@@ -1,0 +1,44 @@
+{
+  "name": "Default Airship",
+  "description": "A basic airship for new players",
+  "blocks": [
+    {"type": "steeringWheel", "x": 0, "y": 0, "z": 0},
+    
+    {"type": "lift", "x": -1, "y": 0, "z": 0},
+    {"type": "lift", "x": 1, "y": 0, "z": 0},
+    {"type": "lift", "x": 0, "y": 0, "z": -1},
+    {"type": "lift", "x": 0, "y": 0, "z": 1},
+    {"type": "lift", "x": -1, "y": 0, "z": -1},
+    {"type": "lift", "x": 1, "y": 0, "z": -1},
+    {"type": "lift", "x": -1, "y": 0, "z": 1},
+    {"type": "lift", "x": 1, "y": 0, "z": 1},
+    
+    {"type": "armor", "x": -2, "y": 0, "z": 0},
+    {"type": "armor", "x": 2, "y": 0, "z": 0},
+    {"type": "armor", "x": 0, "y": 0, "z": -2},
+    {"type": "armor", "x": 0, "y": 0, "z": 2},
+    {"type": "armor", "x": -2, "y": 0, "z": -1},
+    {"type": "armor", "x": 2, "y": 0, "z": -1},
+    {"type": "armor", "x": -2, "y": 0, "z": 1},
+    {"type": "armor", "x": 2, "y": 0, "z": 1},
+    {"type": "armor", "x": -1, "y": 0, "z": -2},
+    {"type": "armor", "x": 1, "y": 0, "z": -2},
+    {"type": "armor", "x": -1, "y": 0, "z": 2},
+    {"type": "armor", "x": 1, "y": 0, "z": 2},
+    
+    {"type": "engine", "x": -1, "y": 0, "z": -3, "direction": {"x": 0, "y": 0, "z": -1}},
+    {"type": "engine", "x": 1, "y": 0, "z": -3, "direction": {"x": 0, "y": 0, "z": -1}},
+    {"type": "engine", "x": -1, "y": 0, "z": 3, "direction": {"x": 0, "y": 0, "z": 1}},
+    {"type": "engine", "x": 1, "y": 0, "z": 3, "direction": {"x": 0, "y": 0, "z": 1}},
+    
+    {"type": "cannon", "x": -3, "y": 0, "z": 0, "direction": {"x": -1, "y": 0, "z": 0}},
+    {"type": "cannon", "x": 3, "y": 0, "z": 0, "direction": {"x": 1, "y": 0, "z": 0}},
+    {"type": "cannon", "x": 0, "y": 0, "z": -3, "direction": {"x": 0, "y": 0, "z": -1}},
+    
+    {"type": "lift", "x": 0, "y": 1, "z": 0},
+    {"type": "lift", "x": -1, "y": 1, "z": 0},
+    {"type": "lift", "x": 1, "y": 1, "z": 0},
+    {"type": "lift", "x": 0, "y": 1, "z": -1},
+    {"type": "lift", "x": 0, "y": 1, "z": 1}
+  ]
+} 

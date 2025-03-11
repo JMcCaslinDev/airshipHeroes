@@ -1,0 +1,28 @@
+{
+  "name": "airship-skirmish",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "jest",
+    "test:e2e": "playwright test",
+    "server": "node server.js",
+    "start": "npm run build && npm run server"
+  },
+  "dependencies": {
+    "three": "^0.160.0",
+    "socket.io-client": "^4.7.2",
+    "express": "^4.18.2",
+    "socket.io": "^4.7.2"
+  },
+  "devDependencies": {
+    "vite": "^5.0.8",
+    "@vitejs/plugin-react": "^4.2.1",
+    "jest": "^29.7.0",
+    "@testing-library/jest-dom": "^6.1.5",
+    "@playwright/test": "^1.40.1"
+  }
+} 
