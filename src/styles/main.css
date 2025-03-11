@@ -1,0 +1,415 @@
+/* Main CSS for Airship Skirmish */
+
+/* Global Styles */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Arial', sans-serif;
+  overflow: hidden;
+  background-color: #000;
+  color: #fff;
+}
+
+/* Canvas */
+#game-canvas {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+}
+
+/* Fullscreen Overlays */
+.fullscreen-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: rgba(0, 0, 0, 0.8);
+  z-index: 100;
+}
+
+/* Loading Screen */
+.loading-container {
+  text-align: center;
+  padding: 2rem;
+  background-color: rgba(30, 30, 30, 0.8);
+  border-radius: 10px;
+  width: 80%;
+  max-width: 500px;
+}
+
+.loading-container h1 {
+  margin-bottom: 2rem;
+  color: #ffcc00;
+  font-size: 2.5rem;
+}
+
+.loading-progress {
+  height: 20px;
+  background-color: #333;
+  border-radius: 10px;
+  margin-bottom: 1rem;
+  overflow: hidden;
+}
+
+#loading-progress-bar {
+  height: 100%;
+  background-color: #ffcc00;
+  width: 0%;
+  transition: width 0.3s ease;
+}
+
+/* Login Screen */
+.login-container {
+  text-align: center;
+  padding: 2rem;
+  background-color: rgba(30, 30, 30, 0.8);
+  border-radius: 10px;
+  width: 80%;
+  max-width: 400px;
+}
+
+.login-container h1 {
+  margin-bottom: 2rem;
+  color: #ffcc00;
+  font-size: 2.5rem;
+}
+
+.form-group {
+  margin-bottom: 1.5rem;
+  text-align: left;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-size: 1rem;
+}
+
+.form-group input {
+  width: 100%;
+  padding: 0.8rem;
+  font-size: 1rem;
+  background-color: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 5px;
+  color: #fff;
+}
+
+.form-group input:focus {
+  outline: none;
+  border-color: #ffcc00;
+}
+
+/* Death Screen */
+.death-container {
+  text-align: center;
+  padding: 2rem;
+  background-color: rgba(30, 30, 30, 0.8);
+  border-radius: 10px;
+  width: 80%;
+  max-width: 400px;
+}
+
+.death-container h1 {
+  margin-bottom: 1rem;
+  color: #ff3333;
+  font-size: 2.5rem;
+}
+
+.death-container p {
+  margin-bottom: 2rem;
+  font-size: 1.2rem;
+}
+
+/* Buttons */
+.primary-button {
+  background-color: #ffcc00;
+  color: #000;
+  border: none;
+  padding: 0.8rem 1.5rem;
+  font-size: 1.1rem;
+  font-weight: bold;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.primary-button:hover {
+  background-color: #ffd633;
+}
+
+.primary-button:active {
+  background-color: #e6b800;
+}
+
+/* HUD */
+#hud {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 10;
+}
+
+#top-hud {
+  position: absolute;
+  top: 20px;
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  padding: 0 20px;
+}
+
+#mode-indicator, #fps-counter {
+  background-color: rgba(0, 0, 0, 0.5);
+  padding: 8px 12px;
+  border-radius: 5px;
+  font-size: 0.9rem;
+}
+
+#mode-indicator {
+  color: #ffcc00;
+}
+
+#fps-counter {
+  color: #fff;
+}
+
+#bottom-hud {
+  position: absolute;
+  bottom: 30px;
+  width: 100%;
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  align-items: center;
+}
+
+#inventory {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: none; /* Hidden by default */
+  gap: 8px;
+  background-color: rgba(0, 0, 0, 0.5);
+  padding: 10px;
+  border-radius: 8px;
+  z-index: 100;
+}
+
+/* Player mode specific inventory styling */
+.player-mode #inventory {
+  display: flex !important;
+  flex-direction: row !important;
+  justify-content: center;
+  align-items: center;
+  width: auto;
+  max-width: 80%;
+  margin: 0 auto;
+}
+
+.inventory-slot {
+  width: 60px;
+  height: 60px;
+  background-color: rgba(30, 30, 30, 0.7);
+  border: 2px solid #555;
+  border-radius: 6px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.5);
+}
+
+.inventory-slot:hover {
+  background-color: rgba(50, 50, 50, 0.8);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3), inset 0 0 5px rgba(0, 0, 0, 0.5);
+}
+
+.inventory-slot.selected {
+  border-color: #FFD700;
+  border-width: 4px;
+  box-shadow: 0 0 20px rgba(255, 215, 0, 0.8), inset 0 0 10px rgba(255, 215, 0, 0.5);
+  transform: scale(1.1);
+  z-index: 20;
+  background-color: rgba(60, 60, 40, 0.9);
+}
+
+.slot-number {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  font-size: 12px;
+  color: #aaa;
+  pointer-events: none;
+  user-select: none;
+}
+
+.inventory-slot.selected .slot-number {
+  color: #FFD700;
+  font-weight: bold;
+}
+
+.inventory-item {
+  width: 85%;
+  height: 85%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  border-radius: 4px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+  background-size: 80%;
+  background-position: center;
+  background-repeat: no-repeat;
+  transform: perspective(300px) rotateX(10deg) rotateY(-10deg);
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.inventory-slot:hover .inventory-item {
+  transform: perspective(300px) rotateX(15deg) rotateY(-15deg) scale(1.05);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+}
+
+.item-count {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  background-color: rgba(0, 0, 0, 0.7);
+  color: white;
+  border-radius: 50%;
+  padding: 2px 6px;
+  font-size: 12px;
+  font-weight: bold;
+  z-index: 2;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.item-icon {
+  font-size: 24px;
+  text-align: center;
+  line-height: 40px;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+/* Crosshair */
+#crosshair {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 20px;
+  height: 20px;
+  background-image: url('/assets/textures/ui/crosshair.svg');
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  display: none;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .inventory-slot {
+    width: 50px;
+    height: 50px;
+  }
+  
+  #top-hud {
+    top: 10px;
+    padding: 0 10px;
+  }
+  
+  #bottom-hud {
+    bottom: 10px;
+  }
+}
+
+@media (max-width: 480px) {
+  .inventory-slot {
+    width: 40px;
+    height: 40px;
+  }
+}
+
+/* Ship Stats Panel */
+.stats-panel {
+  position: absolute;
+  top: 60px;
+  right: 20px;
+  background-color: rgba(0, 0, 0, 0.7);
+  border: 1px solid #444;
+  border-radius: 5px;
+  padding: 10px;
+  width: 250px;
+  z-index: 10;
+  font-size: 14px;
+}
+
+.stats-panel h3 {
+  margin-bottom: 10px;
+  text-align: center;
+  color: #ffcc00;
+  border-bottom: 1px solid #444;
+  padding-bottom: 5px;
+}
+
+.stats-content {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 5px;
+}
+
+.stat-label {
+  color: #aaa;
+}
+
+.stat-value {
+  color: #fff;
+  font-weight: bold;
+}
+
+.block-type-stat {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 3px;
+}
+
+.block-type-bar {
+  height: 8px;
+  background-color: #555;
+  border-radius: 4px;
+  margin-top: 2px;
+  position: relative;
+  width: 100%;
+}
+
+.block-type-fill {
+  height: 100%;
+  border-radius: 4px;
+  position: absolute;
+  left: 0;
+  top: 0;
+} 
