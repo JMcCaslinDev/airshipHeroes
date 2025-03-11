@@ -1,0 +1,51 @@
+# Cursor Guidelines for Airship Skirmish
+
+Before generating any code or response, adhere to the following guidelines to ensure consistency, quality, and adherence to project requirements.
+
+## General Coding Practices
+- Use `camelCase` for variable and function names, `PascalCase` for class names.
+- Avoid code duplication; reuse existing functions and components to follow the DRY (Don't Repeat Yourself) principle.
+- Write clean, readable code with proper indentation and spacing.
+- Add comments to explain complex logic or algorithms for better maintainability.
+
+## Project Structure
+- Organize code into folders based on functionality (e.g., `blocks`, `components`, `modes`, `multiplayer`, `world`, `utils`).
+- Keep files small and focused; each file should have a single responsibility.
+- Use a consistent naming convention for files and folders (e.g., lowercase with hyphens if needed).
+
+## Performance Optimization
+- Render only visible block faces using Three.js geometry optimization to reduce rendering overhead.
+- Limit WebSocket updates to essential data (e.g., position, block changes) to minimize latency.
+- Cap the world height at 500 blocks and use a circular map design to limit resource usage.
+
+## Testing and Quality Assurance
+- Write unit tests for each feature using Jest to ensure individual components work as expected.
+- Implement end-to-end tests using Playwright to verify gameplay functionality across the application.
+- Commit tests with every feature addition in GitHub, accompanied by descriptive commit messages.
+
+## Documentation and Comments
+- Maintain an up-to-date `README.md` with setup instructions, feature descriptions, and usage details.
+- Comment code to explain complex logic or algorithms, making it easier for others to understand.
+- Document ship files with their format and usage instructions for clarity.
+
+## Technology Usage
+- Use Three.js for all 3D rendering tasks, leveraging its capabilities for the game’s visuals.
+- Utilize Vite for development and build processes to streamline workflows.
+- Implement WebSockets for real-time multiplayer interactions to enable seamless gameplay.
+- Deploy the application on Vercel or an alternative free hosting service for accessibility.
+
+## User Interface and Experience
+- Implement intuitive controls:
+  - Ship Mode: `WASD` for movement, `Q` and `E` for rotation.
+  - Player Mode: `WASD` for movement, `Space` to jump, `X` to sneak.
+- Ensure the inventory system is user-friendly with 9 slots and hotkeys (`1-9`) for quick access.
+- Display each player’s username and kill count above their ship for multiplayer visibility.
+
+## Game-Specific Guidelines
+- Ensure ships sink at 1 altitude per second if Lift Blocks constitute less than 30% of total blocks.
+- Implement fire spread mechanics for Lift Blocks, similar to Minecraft wool, to add dynamic combat elements.
+- Configure Cannon Blocks to shoot TNT blocks with a 3-second fuse and a slight arc for realistic trajectories.
+- In Player Mode, allow block placement up to 4 blocks away and include a sneak mechanic triggered by `X`.
+- Store ship designs in a text-based format (e.g., JSON) to enable easy manual editing and sharing.
+
+By following these guidelines, you will help maintain the quality, consistency, and performance of the Airship Skirmish project.
