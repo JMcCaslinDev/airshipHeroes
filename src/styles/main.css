@@ -310,19 +310,20 @@ body {
   text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
 }
 
-/* Crosshair */
+/* Crosshair - All styling now handled with inline styles in JavaScript */
 #crosshair {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 20px;
-  height: 20px;
-  background-image: url('/assets/textures/ui/crosshair.svg');
-  background-size: contain;
-  background-repeat: no-repeat;
-  background-position: center;
-  display: none;
+  /* No CSS styling - all handled inline in JavaScript */
+}
+
+/* Removing all pseudo-element styling as we now use actual DOM elements */
+/* Left horizontal line */
+#crosshair::before {
+  content: none;
+}
+
+/* Right horizontal line */
+#crosshair::after {
+  content: none;
 }
 
 /* Responsive adjustments */
@@ -412,4 +413,16 @@ body {
   position: absolute;
   left: 0;
   top: 0;
+}
+
+/* Special crosshair container - adding this as a global style */
+#crosshair-container {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  pointer-events: none !important;
+  z-index: 9999999 !important; /* Ultra high z-index */
+  overflow: visible !important;
 } 
