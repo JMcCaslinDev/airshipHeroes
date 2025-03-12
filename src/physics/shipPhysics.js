@@ -173,7 +173,7 @@ export function checkCollisions(ship, worldManager) {
   }, Infinity);
   
   // Check if the lowest block is below the ground
-  if (lowestBlock < 0) {
+  if (lowestBlock < 1) {
     // Move the ship up so it's not colliding
     ship.position.y -= lowestBlock;
     
