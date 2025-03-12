@@ -8,7 +8,7 @@ import { clamp } from '../utils/mathUtils.js';
 // Constants
 const GRAVITY = 9.8;
 const DRAG = 0.5;
-const THRUST = 35;
+const THRUST = 60;
 const ROTATION_SPEED = 2.5;
 const LIFT_BLOCK_RATIO = 0.3; // Minimum ratio of lift blocks to total blocks
 
@@ -76,11 +76,11 @@ export function updateShipPhysics(ship, worldManager, deltaTime) {
     
     // Apply rotation
     if (ship.controls.left) {
-      applyTorque(ship, -ROTATION_SPEED * deltaTime);
+      applyTorque(ship, ROTATION_SPEED * deltaTime);
     }
     
     if (ship.controls.right) {
-      applyTorque(ship, ROTATION_SPEED * deltaTime);
+      applyTorque(ship, -ROTATION_SPEED * deltaTime);
     }
   }
   
