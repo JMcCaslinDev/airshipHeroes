@@ -8,8 +8,8 @@ import { clamp } from '../utils/mathUtils.js';
 // Constants
 const GRAVITY = 9.8;
 const DRAG = 0.5;
-const THRUST = 60;
-const ROTATION_SPEED = 2.5;
+const THRUST = 200;
+const ROTATION_SPEED = 20;
 const LIFT_BLOCK_RATIO = 0.3; // Minimum ratio of lift blocks to total blocks
 
 /**
