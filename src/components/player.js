@@ -810,7 +810,7 @@ class Player {
       this.character.position.z
     );
     
-    // Get look direction
+    // Get look direction from camera
     const lookDirection = new THREE.Vector3(0, 0, -1);
     lookDirection.applyEuler(new THREE.Euler(
       this.cameraRotation.x,
@@ -855,6 +855,7 @@ class Player {
         // Check if the intersection is within the maximum placement distance
         if (intersection.distance <= this.maxPlaceDistance) {
           // Calculate placement position based on intersection
+          // Add half the normal vector to place the block adjacent to the face
           placementPos = intersection.point.clone().add(
             intersection.face.normal.clone().multiplyScalar(0.5)
           );
@@ -865,92 +866,20 @@ class Player {
           return;
         }
       } else {
-        console.log("No direct intersection found, trying to find closest block");
+        console.log("No direct intersection found, trying to place block in air");
         
-        // No direct intersection, try to find the closest block
-        let closestBlock = null;
-        let closestDistance = Infinity;
+        // No intersection found, place block in air at a fixed distance
+        placementPos = new THREE.Vector3().copy(eyePosition).add(
+          lookDirection.clone().multiplyScalar(Math.min(3, this.maxPlaceDistance))
+        );
         
-        // Check distance to each block
-        for (const block of this.ship.blocks) {
-          const blockWorldPos = this.ship.getBlockWorldPosition(block);
-          const blockPos = new THREE.Vector3(
-            blockWorldPos.x,
-            blockWorldPos.y,
-            blockWorldPos.z
-          );
-          
-          const distance = eyePosition.distanceTo(blockPos);
-          
-          if (distance < closestDistance) {
-            closestDistance = distance;
-            closestBlock = block;
-          }
-        }
-        
-        console.log("Closest block distance:", closestDistance);
-        
-        if (closestBlock && closestDistance <= this.maxPlaceDistance) {
-          // Snap to the closest block
-          const blockWorldPos = this.ship.getBlockWorldPosition(closestBlock);
-          placementPos = new THREE.Vector3(
-            blockWorldPos.x,
-            blockWorldPos.y,
-            blockWorldPos.z
-          );
-          
-          // Calculate the direction from the closest block to the player's look direction
-          // This helps determine which face of the block to place the new block on
-          const rayEnd = new THREE.Vector3().copy(eyePosition).add(
-            lookDirection.clone().multiplyScalar(this.maxPlaceDistance)
-          );
-          
-          // Find the dominant axis of the look direction
-          const absX = Math.abs(lookDirection.x);
-          const absY = Math.abs(lookDirection.y);
-          const absZ = Math.abs(lookDirection.z);
-          
-          // Find dominant axis
-          if (absX > absY && absX > absZ) {
-            // X-axis dominant
-            placementPos.x += Math.sign(lookDirection.x);
-          } else if (absY > absX && absY > absZ) {
-            // Y-axis dominant
-            placementPos.y += Math.sign(lookDirection.y);
-          } else {
-            // Z-axis dominant
-            placementPos.z += Math.sign(lookDirection.z);
-          }
-          
-          console.log("Adjusted placement position:", placementPos);
-        } else {
-          // Try to place a block in the air along the look direction
-          // This allows placing blocks up to maxPlaceDistance away from the player
-          // even if there's no direct intersection with existing blocks
-          
-          // Calculate position along the look direction
-          placementPos = new THREE.Vector3().copy(eyePosition).add(
-            lookDirection.clone().multiplyScalar(Math.min(2, this.maxPlaceDistance))
-          );
-          
-          // Round to grid position
-          placementPos.x = Math.round(placementPos.x);
-          placementPos.y = Math.round(placementPos.y);
-          placementPos.z = Math.round(placementPos.z);
-          
-          console.log("Placing block in air at position:", placementPos);
-        }
+        console.log("Placing block in air at position:", placementPos);
       }
     } else if (this.ship) {
       // No blocks in ship yet, place the first block at a distance in front of the player
       placementPos = new THREE.Vector3().copy(eyePosition).add(
         lookDirection.clone().multiplyScalar(2) // Place 2 units in front of player
       );
-      
-      // Round to grid position
-      placementPos.x = Math.round(placementPos.x);
-      placementPos.y = Math.round(placementPos.y);
-      placementPos.z = Math.round(placementPos.z);
       
       console.log("Placing first block at position:", placementPos);
     } else {
@@ -960,6 +889,11 @@ class Player {
     }
     
     if (placementPos) {
+      // Round to grid position
+      placementPos.x = Math.round(placementPos.x);
+      placementPos.y = Math.round(placementPos.y);
+      placementPos.z = Math.round(placementPos.z);
+      
       // Convert to grid position relative to ship
       const gridPos = {
         x: Math.round(placementPos.x - this.ship.position.x),
