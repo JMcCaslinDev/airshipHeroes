@@ -26,7 +26,7 @@ export function createPlayerModeController(player, camera) {
     // Physics constants
     gravity: 9.8,
     jumpVelocity: 5,
-    moveSpeed: 5,
+    moveSpeed: 2.5,
     
     // Raycaster for block placement and breaking
     raycaster: new THREE.Raycaster()

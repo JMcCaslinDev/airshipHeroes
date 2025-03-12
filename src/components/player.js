@@ -1391,7 +1391,7 @@ class Player {
     this.character.velocity.y -= 9.8 * deltaTime;
     
     // Apply movement based on controls
-    const moveSpeed = this.character.isSneaking ? 2 : 4;
+    const moveSpeed = this.character.isSneaking ? 1 : 2;
     const moveVector = new THREE.Vector3(0, 0, 0);
     
     if (this.controls.forward) moveVector.z -= 1;
@@ -1413,7 +1413,7 @@ class Player {
     
     // Apply jumping
     if (this.controls.jump && !this.character.isJumping) {
-      this.character.velocity.y = 5;
+      this.character.velocity.y = 2.5;
       this.character.isJumping = true;
     }
     
