@@ -854,12 +854,40 @@ class Player {
         
         // Check if the intersection is within the maximum placement distance
         if (intersection.distance <= this.maxPlaceDistance) {
-          // Calculate placement position based on intersection
-          // Add half the normal vector to place the block adjacent to the face
-          placementPos = intersection.point.clone().add(
-            intersection.face.normal.clone().multiplyScalar(0.5)
+          // Get the normal of the face that was hit
+          const faceNormal = intersection.face.normal.clone();
+          
+          // The normal is in object space, we need to transform it to world space
+          const normalMatrix = new THREE.Matrix3().getNormalMatrix(intersection.object.matrixWorld);
+          faceNormal.applyMatrix3(normalMatrix).normalize();
+          
+          // Get the position of the block that was hit
+          const hitBlockPosition = new THREE.Vector3();
+          hitBlockPosition.copy(intersection.point).sub(faceNormal.clone().multiplyScalar(0.5));
+          
+          // Round to get the grid position of the hit block
+          const hitBlockGridPos = {
+            x: Math.round(hitBlockPosition.x - this.ship.position.x),
+            y: Math.round(hitBlockPosition.y - this.ship.position.y),
+            z: Math.round(hitBlockPosition.z - this.ship.position.z)
+          };
+          
+          // Calculate the position for the new block by adding the face normal
+          placementPos = new THREE.Vector3(
+            hitBlockGridPos.x + Math.round(faceNormal.x),
+            hitBlockGridPos.y + Math.round(faceNormal.y),
+            hitBlockGridPos.z + Math.round(faceNormal.z)
           );
           
+          // Add the ship position to get world coordinates
+          placementPos.add(new THREE.Vector3(
+            this.ship.position.x,
+            this.ship.position.y,
+            this.ship.position.z
+          ));
+          
+          console.log("Hit block grid position:", hitBlockGridPos);
+          console.log("Face normal (world space):", faceNormal);
           console.log("Placement position (world):", placementPos);
         } else {
           console.log(`Intersection too far (${intersection.distance} > ${this.maxPlaceDistance})`);
