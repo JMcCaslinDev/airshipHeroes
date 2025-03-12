@@ -1,0 +1,1615 @@
+/**
+ * Player Class
+ * 
+ * Manages player-specific functionality, including:
+ * - Player information (username, kills, deaths)
+ * - Inventory management
+ * - Control modes (Ship Mode and Player Mode)
+ * - Input handling
+ */
+
+import * as THREE from 'three';
+import Ship from './ship.js';
+import BlockFactory from '../blocks/blockFactory.js';
+
+class Player {
+  /**
+   * Constructor for the Player class
+   * @param {Object} options - Options for the player
+   */
+  constructor(options = {}) {
+    this.username = options.username || 'Player';
+    this.kills = 0;
+    this.deaths = 0;
+    this.ship = null;
+    this.mode = 'ship'; // 'ship' or 'player'
+    this.shipStorage = options.shipStorage || null;
+    
+    // Player character (for Player Mode)
+    this.character = {
+      height: 2, // 2 blocks tall
+      width: 0.6, // 0.6 blocks wide
+      position: { x: 0, y: 0, z: 0 },
+      velocity: { x: 0, y: 0, z: 0 },
+      rotation: 0,
+      isSneaking: false,
+      isJumping: false,
+      mesh: null
+    };
+    
+    // Camera
+    this.camera = options.camera || null;
+    this.cameraRotation = { x: 0, y: 0 };
+    
+    // Inventory
+    this.inventory = {
+      slots: Array(9).fill(null),
+      selectedSlot: 0,
+      maxStackSize: 999,
+      infiniteBlocks: true
+    };
+    
+    // Controls state
+    this.controls = {
+      forward: false,
+      backward: false,
+      left: false,
+      right: false,
+      up: false,
+      down: false,
+      jump: false,
+      sneak: false,
+      fire: false
+    };
+    
+    // Block placement
+    this.maxPlaceDistance = 5; // Maximum distance to place blocks (in Player Mode)
+    this.selectedBlock = null; // Currently selected block type for placement
+    
+    // UI elements
+    this.uiElements = {
+      inventory: null,
+      modeIndicator: null,
+      stats: null
+    };
+  }
+
+  /**
+   * Initialize the player
+   * @param {THREE.Scene} scene - The Three.js scene
+   * @param {THREE.Camera} camera - The Three.js camera
+   */
+  init(scene, camera) {
+    this.camera = camera;
+    
+    // Create player character mesh (for Player Mode)
+    this.createCharacterMesh(scene);
+    
+    // Create a new ship for the player
+    this.ship = new Ship({
+      owner: this,
+      position: { x: 0, y: 100, z: 0 }
+    });
+    
+    // Get UI elements
+    this.uiElements.inventory = document.getElementById('inventory');
+    this.uiElements.modeIndicator = document.getElementById('mode-indicator');
+    this.uiElements.stats = document.getElementById('fps-counter'); // Using fps-counter as stats for now
+    
+    // Try to load inventory from local storage, or initialize with defaults if not available
+    if (!this.loadInventory()) {
+      this.initializeInventory();
+    }
+    
+    // Select the first inventory slot by default
+    this.selectInventorySlot(0);
+    
+    // Update UI
+    this.updateUI();
+    
+    // Set up event listeners for controls
+    this.setupEventListeners();
+    
+    console.log('Player initialized with inventory:', this.inventory);
+  }
+
+  /**
+   * Create the player character mesh (for Player Mode)
+   * @param {THREE.Scene} scene - The Three.js scene
+   */
+  createCharacterMesh(scene) {
+    try {
+      // Check if scene is provided
+      if (!scene) {
+        console.error('Scene is undefined in createCharacterMesh');
+        return;
+      }
+      
+      // Create a simple capsule for the player character
+      const geometry = new THREE.CapsuleGeometry(0.3, 1.4, 4, 8);
+      const material = new THREE.MeshStandardMaterial({ color: 0x0000ff }); // Blue
+      
+      this.character.mesh = new THREE.Mesh(geometry, material);
+      this.character.mesh.castShadow = true;
+      
+      // Position at the center of the ship initially
+      if (this.ship) {
+        this.character.position = { ...this.ship.position };
+        this.character.position.y += 1; // Stand on top of the ship
+      }
+      
+      this.character.mesh.position.set(
+        this.character.position.x,
+        this.character.position.y,
+        this.character.position.z
+      );
+      
+      // Add to scene
+      scene.add(this.character.mesh);
+      
+      // Hide initially (start in Ship Mode)
+      this.character.mesh.visible = false;
+      
+      console.log('Character mesh created successfully');
+    } catch (error) {
+      console.error('Error creating character mesh:', error);
+    }
+  }
+
+  /**
+   * Set up event listeners for keyboard and mouse controls
+   */
+  setupEventListeners() {
+    console.log("Setting up event listeners for player controls");
+    
+    // Keyboard controls
+    document.addEventListener('keydown', (event) => {
+      // Check for number keys (1-9) for inventory selection - ONLY in player mode
+      if (event.key >= '1' && event.key <= '9' && this.mode === 'player') {
+        const slotIndex = parseInt(event.key) - 1;
+        console.log(`Number key ${event.key} pressed, selecting inventory slot ${slotIndex + 1}`);
+        this.selectInventorySlot(slotIndex);
+        return; // Don't prevent default to allow other handlers
+      }
+      
+      this.handleKeyDown(event);
+    });
+    
+    document.addEventListener('keyup', (event) => {
+      this.handleKeyUp(event);
+    });
+    
+    // Mouse controls
+    document.addEventListener('mousemove', (event) => {
+      this.handleMouseMove(event);
+    });
+    
+    document.addEventListener('mousedown', (event) => {
+      this.handleMouseDown(event);
+    });
+    
+    document.addEventListener('mouseup', (event) => {
+      this.handleMouseUp(event);
+    });
+    
+    // Prevent context menu on right-click
+    document.addEventListener('contextmenu', (event) => {
+      console.log("Context menu prevented");
+      event.preventDefault();
+      return false;
+    });
+    
+    // Request pointer lock when clicking on the canvas in Player Mode
+    document.addEventListener('click', () => {
+      if (this.mode === 'player' && !document.pointerLockElement) {
+        document.body.requestPointerLock();
+      }
+    });
+    
+    // Add click handlers for inventory slots
+    const inventorySlots = document.querySelectorAll('.inventory-slot');
+    inventorySlots.forEach((slot, index) => {
+      slot.addEventListener('click', () => {
+        console.log(`Clicked inventory slot ${index + 1}`);
+        this.selectInventorySlot(index);
+      });
+    });
+    
+    console.log("Event listeners set up successfully");
+  }
+
+  /**
+   * Handle key down events
+   * @param {KeyboardEvent} event - The key event
+   */
+  handleKeyDown(event) {
+    // Log all key presses in player mode for debugging
+    if (this.mode === 'player') {
+      console.log(`Key pressed: ${event.key} (keyCode: ${event.keyCode})`);
+    }
+    
+    switch (event.key.toLowerCase()) {
+      // Movement controls (both modes)
+      case 'w':
+        this.controls.forward = true;
+        break;
+      case 's':
+        this.controls.backward = true;
+        break;
+      case 'a':
+        this.controls.left = true;
+        break;
+      case 'd':
+        this.controls.right = true;
+        break;
+        
+      // Ship Mode specific controls
+      case 'q':
+        if (this.mode === 'ship') this.controls.up = true;
+        break;
+      case 'e':
+        if (this.mode === 'ship') this.controls.down = true;
+        break;
+        
+      // Player Mode specific controls
+      case ' ':
+        if (this.mode === 'player') this.controls.jump = true;
+        break;
+      case 'x':
+        if (this.mode === 'player') this.controls.sneak = true;
+        break;
+        
+      // Mode switching
+      case 'b':
+        this.toggleMode();
+        break;
+        
+      // Inventory selection (only in player mode)
+      case '1': case '2': case '3': case '4': case '5':
+      case '6': case '7': case '8': case '9':
+        if (this.mode === 'player') {
+          const slotIndex = parseInt(event.key) - 1;
+          console.log(`Number key ${event.key} pressed - selecting inventory slot ${slotIndex + 1}`);
+          this.selectInventorySlot(slotIndex);
+        } else {
+          console.log(`Ignoring number key ${event.key} in ship mode`);
+        }
+        break;
+        
+      // Fire cannons
+      case 'r':
+        this.controls.fire = true;
+        break;
+    }
+  }
+
+  /**
+   * Handle keyup events
+   * @param {KeyboardEvent} event - The keyboard event
+   */
+  handleKeyUp(event) {
+    switch (event.key.toLowerCase()) {
+      // Movement controls (both modes)
+      case 'w':
+        this.controls.forward = false;
+        break;
+      case 's':
+        this.controls.backward = false;
+        break;
+      case 'a':
+        this.controls.left = false;
+        break;
+      case 'd':
+        this.controls.right = false;
+        break;
+        
+      // Ship Mode specific controls
+      case 'q':
+        this.controls.up = false;
+        break;
+      case 'e':
+        this.controls.down = false;
+        break;
+        
+      // Player Mode specific controls
+      case ' ':
+        this.controls.jump = false;
+        break;
+      case 'x':
+        this.controls.sneak = false;
+        break;
+        
+      // Fire cannons
+      case 'r':
+        this.controls.fire = false;
+        break;
+    }
+  }
+
+  /**
+   * Handle mouse movement
+   * @param {MouseEvent} event - The mouse event
+   */
+  handleMouseMove(event) {
+    if (this.mode === 'player' && document.pointerLockElement) {
+      // Player Mode - First-person camera rotation
+      const sensitivity = 0.002;
+      this.cameraRotation.y -= event.movementX * sensitivity;
+      this.cameraRotation.x -= event.movementY * sensitivity;
+      
+      // Limit vertical rotation to prevent flipping
+      this.cameraRotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, this.cameraRotation.x));
+      
+      // Update character rotation
+      this.character.rotation = this.cameraRotation.y;
+    } else if (this.mode === 'ship') {
+      // Ship Mode - Orbit camera (handled elsewhere)
+    }
+  }
+
+  /**
+   * Handle mouse down events
+   * @param {MouseEvent} event - The mouse event
+   */
+  handleMouseDown(event) {
+    console.log("Mouse down event", {
+      button: event.button,
+      mode: this.mode,
+      selectedSlot: this.inventory.selectedSlot,
+      selectedBlock: this.selectedBlock
+    });
+    
+    // Prevent default behavior for right-click
+    if (event.button === 2) {
+      event.preventDefault();
+    }
+    
+    if (this.mode === 'player') {
+      if (event.button === 0) {
+        // Left click - Break block
+        console.log("Left click - Breaking block");
+        this.breakBlock();
+      } else if (event.button === 2) {
+        // Right click - Place block
+        console.log("Right click - Placing block", {
+          selectedSlot: this.inventory.selectedSlot,
+          selectedBlock: this.selectedBlock
+        });
+        this.placeBlock();
+      }
+    }
+    
+    return false; // Prevent default
+  }
+
+  /**
+   * Handle mouse up events
+   * @param {MouseEvent} event - The mouse event
+   */
+  handleMouseUp(event) {
+    // Handle mouse up events if needed
+  }
+
+  /**
+   * Toggle between Ship Mode and Player Mode
+   */
+  toggleMode() {
+    if (this.mode === 'ship') {
+      // Switch to Player Mode
+      this.mode = 'player';
+      
+      // Show player character
+      if (this.character.mesh) {
+        this.character.mesh.visible = true;
+      }
+      
+      // Position character on the ship
+      if (this.ship && this.ship.steeringWheel) {
+        const wheelPos = this.ship.getBlockWorldPosition(this.ship.steeringWheel);
+        this.character.position = { ...wheelPos };
+        this.character.position.y += 1; // Stand on top of the steering wheel
+        
+        if (this.character.mesh) {
+          this.character.mesh.position.set(
+            this.character.position.x,
+            this.character.position.y,
+            this.character.position.z
+          );
+        }
+      }
+      
+      // Reset inventory selection to first slot when entering player mode
+      this.inventory.selectedSlot = 0;
+      
+      // Update inventory UI to reflect the selection
+      const inventoryElement = document.getElementById('inventory');
+      if (inventoryElement) {
+        const slots = inventoryElement.querySelectorAll('.inventory-slot');
+        slots.forEach((slot, index) => {
+          slot.classList.toggle('selected', index === 0);
+        });
+      }
+      
+      // Request pointer lock for first-person view
+      document.body.requestPointerLock();
+    } else {
+      // Switch to Ship Mode
+      this.mode = 'ship';
+      
+      // Hide player character
+      if (this.character.mesh) {
+        this.character.mesh.visible = false;
+      }
+      
+      // Exit pointer lock
+      if (document.pointerLockElement) {
+        document.exitPointerLock();
+      }
+    }
+    
+    // Update UI
+    this.updateUI();
+  }
+
+  /**
+   * Select an inventory slot
+   * @param {number} slotIndex - The index of the slot to select (0-8)
+   */
+  selectInventorySlot(slotIndex) {
+    // Only allow inventory selection in player mode
+    if (this.mode !== 'player') {
+      console.log(`Cannot select inventory slot in ${this.mode} mode`);
+      return;
+    }
+    
+    console.log(`Selecting inventory slot ${slotIndex + 1}`);
+    
+    // Validate slot index
+    if (slotIndex < 0 || slotIndex >= this.inventory.slots.length) {
+      console.error(`Invalid slot index: ${slotIndex}`);
+      return;
+    }
+    
+    // Update selected slot
+    const previousSlot = this.inventory.selectedSlot;
+    this.inventory.selectedSlot = slotIndex;
+    console.log(`Changed selected slot from ${previousSlot + 1} to ${slotIndex + 1}`);
+    
+    // Update selected block based on the slot content
+    const slotContent = this.inventory.slots[slotIndex];
+    if (slotContent) {
+      this.selectedBlock = { 
+        type: slotContent.type, 
+        count: slotContent.count 
+      };
+      console.log(`Selected block: ${this.selectedBlock.type} (${this.selectedBlock.count})`);
+    } else {
+      this.selectedBlock = null;
+      console.log("Selected slot is empty");
+    }
+    
+    // Force a complete UI update to ensure the selection is properly displayed
+    this.updateInventoryUI();
+    
+    // Save inventory state
+    this.saveInventory();
+  }
+  
+  /**
+   * Update the UI to reflect the newly selected slot without recreating the entire inventory UI
+   * @param {Number} previousSlot - The previously selected slot index
+   * @param {Number} newSlot - The newly selected slot index
+   */
+  updateSelectedSlotUI(previousSlot, newSlot) {
+    console.log(`Updating selected slot UI: ${previousSlot + 1} -> ${newSlot + 1}`);
+    
+    // Get the inventory container
+    const inventoryContainer = document.getElementById('inventory');
+    if (!inventoryContainer) {
+      console.error("Inventory container not found");
+      return;
+    }
+    
+    // Get all inventory slots
+    const slots = inventoryContainer.querySelectorAll('.inventory-slot');
+    
+    if (slots.length === 0) {
+      console.log("No inventory slots found, recreating entire UI");
+      this.updateInventoryUI();
+      return;
+    }
+    
+    console.log(`Found ${slots.length} inventory slots`);
+    
+    // Debug: log all slots and their dataset values
+    slots.forEach((slot, index) => {
+      console.log(`Slot ${index + 1} dataset: ${slot.dataset.slot}, has selected class: ${slot.classList.contains('selected')}`);
+    });
+    
+    // Remove 'selected' class from all slots first
+    slots.forEach(slot => {
+      if (slot.classList.contains('selected')) {
+        slot.classList.remove('selected');
+        console.log(`Removed 'selected' class from slot with dataset ${slot.dataset.slot}`);
+      }
+    });
+    
+    // Add 'selected' class to the newly selected slot
+    // Find the slot with the matching dataset.slot value
+    let found = false;
+    slots.forEach(slot => {
+      if (parseInt(slot.dataset.slot) === newSlot) {
+        slot.classList.add('selected');
+        console.log(`Added 'selected' class to slot with dataset ${slot.dataset.slot}`);
+        found = true;
+      }
+    });
+    
+    if (!found) {
+      console.error(`Could not find slot with dataset.slot = ${newSlot}`);
+      // Fallback: try to use the index directly
+      if (newSlot >= 0 && newSlot < slots.length) {
+        slots[newSlot].classList.add('selected');
+        console.log(`Added 'selected' class to slot at index ${newSlot}`);
+      } else {
+        console.error(`Invalid new slot index: ${newSlot}`);
+      }
+    }
+  }
+
+  /**
+   * Add an item to the inventory
+   * @param {Object} item - The item to add
+   * @returns {Boolean} - Whether the item was successfully added
+   */
+  addToInventory(item) {
+    // Find an existing stack of the same type that isn't full
+    for (let i = 0; i < this.inventory.slots.length; i++) {
+      const slot = this.inventory.slots[i];
+      
+      if (slot && slot.type === item.type && slot.count < this.inventory.maxStackSize) {
+        // Add to existing stack
+        slot.count++;
+        this.updateInventoryUI();
+        this.saveInventory(); // Save inventory state
+        return true;
+      }
+    }
+    
+    // Find an empty slot
+    for (let i = 0; i < this.inventory.slots.length; i++) {
+      if (!this.inventory.slots[i]) {
+        // Add to empty slot
+        this.inventory.slots[i] = {
+          type: item.type,
+          count: 1
+        };
+        this.updateInventoryUI();
+        this.saveInventory(); // Save inventory state
+        return true;
+      }
+    }
+    
+    // Inventory is full
+    return false;
+  }
+
+  /**
+   * Remove an item from the inventory
+   * @param {Number} slotIndex - The index of the slot to remove from
+   * @param {Number} count - The number of items to remove
+   * @returns {Boolean} - Whether the items were successfully removed
+   */
+  removeFromInventory(slotIndex, count = 1) {
+    if (slotIndex >= 0 && slotIndex < this.inventory.slots.length) {
+      const slot = this.inventory.slots[slotIndex];
+      
+      if (slot) {
+        // If infinite blocks is enabled, don't actually reduce the count
+        if (!this.inventory.infiniteBlocks) {
+          // Remove items
+          slot.count -= count;
+          
+          // Remove slot if empty
+          if (slot.count <= 0) {
+            this.inventory.slots[slotIndex] = null;
+          }
+        }
+        
+        this.updateInventoryUI();
+        this.saveInventory(); // Save inventory state
+        return true;
+      }
+    }
+    
+    return false;
+  }
+
+  /**
+   * Initialize the player's inventory with default blocks
+   */
+  initializeInventory() {
+    // Add some default blocks to the inventory
+    const defaultBlocks = [
+      { type: 'wood', count: 999 },
+      { type: 'stone', count: 999 },
+      { type: 'lift', count: 999 },
+      { type: 'cannon', count: 999 },
+      { type: 'control', count: 999 }
+    ];
+    
+    // Add each block type to the inventory
+    defaultBlocks.forEach((block, index) => {
+      if (index < this.inventory.slots.length) {
+        this.inventory.slots[index] = block;
+      } else {
+        // If we have more block types than slots, just add them to the inventory
+        this.addToInventory(block);
+      }
+    });
+    
+    // Update the UI
+    this.updateInventoryUI();
+  }
+
+  /**
+   * Break a block in the world
+   */
+  breakBlock() {
+    console.log("breakBlock called", {
+      mode: this.mode,
+      selectedSlot: this.inventory.selectedSlot
+    });
+    
+    // Only allow block breaking in player mode
+    if (this.mode !== 'player') {
+      console.log("Cannot break blocks in ship mode");
+      return;
+    }
+    
+    // Get eye position (camera position)
+    const eyePosition = new THREE.Vector3(
+      this.character.position.x,
+      this.character.position.y + 1.6, // Eye level
+      this.character.position.z
+    );
+    
+    // Get look direction
+    const lookDirection = new THREE.Vector3(0, 0, -1);
+    lookDirection.applyEuler(new THREE.Euler(
+      this.cameraRotation.x,
+      this.cameraRotation.y,
+      0,
+      'YXZ'
+    ));
+    lookDirection.normalize();
+    
+    console.log("Eye position:", eyePosition);
+    console.log("Look direction:", lookDirection);
+    
+    // Cast ray to find block to break
+    const raycaster = new THREE.Raycaster(eyePosition, lookDirection);
+    raycaster.far = this.maxPlaceDistance; // Use the same distance as for placing blocks
+    
+    // Check for intersection with the ship
+    if (this.ship && this.ship.blocks.length > 0) {
+      // Get all block meshes from the ship
+      const blockMeshes = [];
+      this.ship.group.traverse(child => {
+        if (child.isMesh && child.userData.isBlock) {
+          blockMeshes.push(child);
+        }
+      });
+      
+      console.log(`Found ${blockMeshes.length} block meshes to check for intersection`);
+      
+      // Check for intersection with block meshes
+      const intersects = raycaster.intersectObjects(blockMeshes, false);
+      
+      if (intersects.length > 0) {
+        // Get the first intersection
+        const intersection = intersects[0];
+        console.log("Intersection found at distance:", intersection.distance);
+        
+        // Check if the intersection is within the maximum distance
+        if (intersection.distance <= this.maxPlaceDistance) {
+          // Get the block from the mesh
+          const mesh = intersection.object;
+          const block = mesh.userData.block;
+          
+          if (block) {
+            console.log(`Breaking block of type: ${block.type} at position:`, block.position);
+            
+            // Try to remove the block from the ship
+            const removed = this.ship.removeBlock(block);
+            
+            if (removed) {
+              console.log("Block successfully removed from ship");
+              
+              // Add to inventory
+              this.addToInventory({ type: block.type });
+              
+              // Save ship to localStorage if shipStorage is available
+              if (this.shipStorage && this.username) {
+                try {
+                  const shipDefinition = this.ship.serialize();
+                  this.shipStorage.saveShip(this.username, shipDefinition);
+                  console.log("Ship saved to localStorage after block removal");
+                } catch (error) {
+                  console.error("Error saving ship to localStorage:", error);
+                }
+              }
+              
+              // Also save the inventory state
+              this.saveInventory();
+            } else {
+              console.log("Block could not be removed (might be a critical block)");
+            }
+          } else {
+            console.error("No block data found on mesh");
+          }
+        } else {
+          console.log(`Block too far to break (${intersection.distance} > ${this.maxPlaceDistance})`);
+        }
+      } else {
+        console.log("No block found to break");
+      }
+    } else {
+      console.log("No ship or blocks available to break");
+    }
+  }
+
+  /**
+   * Place a block in the world
+   */
+  placeBlock() {
+    console.log("placeBlock called", {
+      mode: this.mode,
+      selectedSlot: this.inventory.selectedSlot,
+      inventory: this.inventory.slots
+    });
+    
+    // Only allow block placement in player mode
+    if (this.mode !== 'player') {
+      console.log("Cannot place blocks in ship mode");
+      return;
+    }
+    
+    // Check if we have a selected block
+    if (!this.selectedBlock) {
+      // Try to select a block from the current slot
+      const currentSlot = this.inventory.slots[this.inventory.selectedSlot];
+      if (currentSlot) {
+        this.selectedBlock = { type: currentSlot.type, count: currentSlot.count };
+        console.log(`Selected block from current slot: ${this.selectedBlock.type}`);
+      } else {
+        console.log("No block selected, trying to find a non-empty slot");
+        for (let i = 0; i < this.inventory.slots.length; i++) {
+          if (this.inventory.slots[i]) {
+            this.selectInventorySlot(i);
+            this.selectedBlock = { type: this.inventory.slots[i].type, count: this.inventory.slots[i].count };
+            console.log(`Auto-selected slot ${i + 1} with ${this.selectedBlock?.type || 'none'}`);
+            break;
+          }
+        }
+      }
+      
+      // Still no block selected? Can't place anything
+      if (!this.selectedBlock) {
+        console.log("No blocks in inventory to place");
+        return;
+      }
+    }
+    
+    console.log(`Placing block of type: ${this.selectedBlock.type}`);
+    
+    // Get eye position (camera position)
+    const eyePosition = new THREE.Vector3(
+      this.character.position.x,
+      this.character.position.y + 1.6, // Eye level
+      this.character.position.z
+    );
+    
+    // Get look direction
+    const lookDirection = new THREE.Vector3(0, 0, -1);
+    lookDirection.applyEuler(new THREE.Euler(
+      this.cameraRotation.x,
+      this.cameraRotation.y,
+      0,
+      'YXZ'
+    ));
+    lookDirection.normalize();
+    
+    console.log("Eye position:", eyePosition);
+    console.log("Look direction:", lookDirection);
+    
+    // Cast ray to find placement position
+    const raycaster = new THREE.Raycaster(eyePosition, lookDirection);
+    raycaster.far = this.maxPlaceDistance; // Limit ray distance to max placement distance
+    
+    // Check for intersection with existing blocks
+    let placementPos = null;
+    
+    // First, check for intersection with the ship
+    if (this.ship && this.ship.blocks.length > 0) {
+      // Get all block meshes from the ship
+      const blockMeshes = [];
+      this.ship.group.traverse(child => {
+        if (child.isMesh) {
+          // Mark all meshes as blocks for raycasting
+          child.userData.isBlock = true;
+          blockMeshes.push(child);
+        }
+      });
+      
+      console.log(`Found ${blockMeshes.length} block meshes to check for intersection`);
+      
+      // Check for intersection with block meshes
+      const intersects = raycaster.intersectObjects(blockMeshes, false);
+      
+      if (intersects.length > 0) {
+        // Get the first intersection
+        const intersection = intersects[0];
+        console.log("Intersection found at distance:", intersection.distance);
+        
+        // Check if the intersection is within the maximum placement distance
+        if (intersection.distance <= this.maxPlaceDistance) {
+          // Calculate placement position based on intersection
+          placementPos = intersection.point.clone().add(
+            intersection.face.normal.clone().multiplyScalar(0.5)
+          );
+          
+          console.log("Placement position (world):", placementPos);
+        } else {
+          console.log(`Intersection too far (${intersection.distance} > ${this.maxPlaceDistance})`);
+          return;
+        }
+      } else {
+        console.log("No direct intersection found, trying to find closest block");
+        
+        // No direct intersection, try to find the closest block
+        let closestBlock = null;
+        let closestDistance = Infinity;
+        
+        // Check distance to each block
+        for (const block of this.ship.blocks) {
+          const blockWorldPos = this.ship.getBlockWorldPosition(block);
+          const blockPos = new THREE.Vector3(
+            blockWorldPos.x,
+            blockWorldPos.y,
+            blockWorldPos.z
+          );
+          
+          const distance = eyePosition.distanceTo(blockPos);
+          
+          if (distance < closestDistance) {
+            closestDistance = distance;
+            closestBlock = block;
+          }
+        }
+        
+        console.log("Closest block distance:", closestDistance);
+        
+        if (closestBlock && closestDistance <= this.maxPlaceDistance) {
+          // Snap to the closest block
+          const blockWorldPos = this.ship.getBlockWorldPosition(closestBlock);
+          placementPos = new THREE.Vector3(
+            blockWorldPos.x,
+            blockWorldPos.y,
+            blockWorldPos.z
+          );
+          
+          // Calculate the direction from the closest block to the player's look direction
+          // This helps determine which face of the block to place the new block on
+          const rayEnd = new THREE.Vector3().copy(eyePosition).add(
+            lookDirection.clone().multiplyScalar(this.maxPlaceDistance)
+          );
+          
+          // Find the dominant axis of the look direction
+          const absX = Math.abs(lookDirection.x);
+          const absY = Math.abs(lookDirection.y);
+          const absZ = Math.abs(lookDirection.z);
+          
+          // Find dominant axis
+          if (absX > absY && absX > absZ) {
+            // X-axis dominant
+            placementPos.x += Math.sign(lookDirection.x);
+          } else if (absY > absX && absY > absZ) {
+            // Y-axis dominant
+            placementPos.y += Math.sign(lookDirection.y);
+          } else {
+            // Z-axis dominant
+            placementPos.z += Math.sign(lookDirection.z);
+          }
+          
+          console.log("Adjusted placement position:", placementPos);
+        } else {
+          // Try to place a block in the air along the look direction
+          // This allows placing blocks up to maxPlaceDistance away from the player
+          // even if there's no direct intersection with existing blocks
+          
+          // Calculate position along the look direction
+          placementPos = new THREE.Vector3().copy(eyePosition).add(
+            lookDirection.clone().multiplyScalar(Math.min(2, this.maxPlaceDistance))
+          );
+          
+          // Round to grid position
+          placementPos.x = Math.round(placementPos.x);
+          placementPos.y = Math.round(placementPos.y);
+          placementPos.z = Math.round(placementPos.z);
+          
+          console.log("Placing block in air at position:", placementPos);
+        }
+      }
+    } else if (this.ship) {
+      // No blocks in ship yet, place the first block at a distance in front of the player
+      placementPos = new THREE.Vector3().copy(eyePosition).add(
+        lookDirection.clone().multiplyScalar(2) // Place 2 units in front of player
+      );
+      
+      // Round to grid position
+      placementPos.x = Math.round(placementPos.x);
+      placementPos.y = Math.round(placementPos.y);
+      placementPos.z = Math.round(placementPos.z);
+      
+      console.log("Placing first block at position:", placementPos);
+    } else {
+      // No ship available
+      console.log("No ship available to place blocks on");
+      return;
+    }
+    
+    if (placementPos) {
+      // Convert to grid position relative to ship
+      const gridPos = {
+        x: Math.round(placementPos.x - this.ship.position.x),
+        y: Math.round(placementPos.y - this.ship.position.y),
+        z: Math.round(placementPos.z - this.ship.position.z)
+      };
+      
+      console.log("Attempting to place block at grid position:", gridPos);
+      
+      // Check if position is within placement range
+      const distance = eyePosition.distanceTo(new THREE.Vector3(
+        gridPos.x + this.ship.position.x,
+        gridPos.y + this.ship.position.y,
+        gridPos.z + this.ship.position.z
+      ));
+      
+      console.log("Distance to placement position:", distance, "max:", this.maxPlaceDistance);
+      
+      if (distance <= this.maxPlaceDistance) {
+        // Check if there's already a block at this position
+        const existingBlock = this.ship.blocks.find(block => 
+          block.position.x === gridPos.x &&
+          block.position.y === gridPos.y &&
+          block.position.z === gridPos.z
+        );
+        
+        if (!existingBlock) {
+          console.log(`Placing ${this.selectedBlock.type} block at position:`, gridPos);
+          
+          // Remove from inventory
+          const removed = this.removeFromInventory(this.inventory.selectedSlot);
+          
+          if (removed) {
+            // Create new block
+            const newBlock = {
+              type: this.selectedBlock.type,
+              position: { ...gridPos },
+              health: 100,
+              mesh: null,
+              
+              // Create mesh for the block
+              createMesh(group, textureLoader) {
+                // Create geometry
+                const geometry = new THREE.BoxGeometry(1, 1, 1);
+                
+                // Get texture for the block type
+                let texture;
+                try {
+                  if (textureLoader && typeof textureLoader.get === 'function') {
+                    texture = textureLoader.get(this.type);
+                  }
+                } catch (error) {
+                  console.error(`Failed to load texture for block type: ${this.type}`, error);
+                }
+                
+                // Create material
+                let material;
+                if (texture) {
+                  material = new THREE.MeshStandardMaterial({ map: texture });
+                } else {
+                  // Use a default color based on block type
+                  let color;
+                  switch (this.type) {
+                    case 'wood': color = 0x8B4513; break;
+                    case 'stone': color = 0x808080; break;
+                    case 'lift': color = 0xFFD700; break;
+                    case 'cannon': color = 0x696969; break;
+                    case 'control': color = 0x8B0000; break;
+                    default: color = 0xAAAAAA; break;
+                  }
+                  material = new THREE.MeshStandardMaterial({ color });
+                }
+                
+                // Create mesh
+                this.mesh = new THREE.Mesh(geometry, material);
+                this.mesh.position.set(this.position.x, this.position.y, this.position.z);
+                this.mesh.castShadow = true;
+                this.mesh.receiveShadow = true;
+                
+                // Store a reference to the block on the mesh
+                this.mesh.userData.block = this;
+                this.mesh.userData.isBlock = true;
+                
+                // Add to group
+                group.add(this.mesh);
+                
+                console.log(`Created mesh for ${this.type} block at position:`, this.position);
+              }
+            };
+            
+            // Get the resource loader
+            let resourceLoader = window.resourceLoader;
+            
+            // If window.resourceLoader is not available, use a simple fallback
+            if (!resourceLoader) {
+              console.warn("Resource loader not found on window object, using fallback");
+              
+              // Create a simple fallback texture loader
+              resourceLoader = {
+                get: function(type) {
+                  // Create a canvas for the texture
+                  const canvas = document.createElement('canvas');
+                  canvas.width = 64;
+                  canvas.height = 64;
+                  const ctx = canvas.getContext('2d');
+                  
+                  // Fill with a color based on block type
+                  switch (type) {
+                    case 'wood': ctx.fillStyle = '#8B4513'; break;
+                    case 'stone': ctx.fillStyle = '#808080'; break;
+                    case 'lift': ctx.fillStyle = '#FFD700'; break;
+                    case 'cannon': ctx.fillStyle = '#696969'; break;
+                    case 'control': ctx.fillStyle = '#8B0000'; break;
+                    default: ctx.fillStyle = '#AAAAAA'; break;
+                  }
+                  
+                  ctx.fillRect(0, 0, 64, 64);
+                  return new THREE.CanvasTexture(canvas);
+                }
+              };
+            }
+            
+            // Add to ship with the resource loader
+            if (newBlock) {
+              // Create the mesh before adding to the ship
+              newBlock.createMesh(this.ship.group, resourceLoader);
+              
+              // Add to ship's blocks array
+              this.ship.blocks.push(newBlock);
+              
+              console.log("Block added to ship");
+              
+              // Save ship to localStorage if shipStorage is available
+              if (this.shipStorage && this.username) {
+                try {
+                  const shipDefinition = this.ship.serialize();
+                  this.shipStorage.saveShip(this.username, shipDefinition);
+                  console.log("Ship saved to localStorage");
+                } catch (error) {
+                  console.error("Error saving ship to localStorage:", error);
+                }
+              }
+              
+              // Also save the inventory state
+              this.saveInventory();
+              
+              // Force update the ship's group to ensure the new block is visible
+              this.ship.group.updateMatrixWorld(true);
+            } else {
+              console.error("Failed to create new block");
+              
+              // Add the item back to inventory since placement failed
+              this.addToInventory({ type: this.selectedBlock.type });
+            }
+          } else {
+            console.error("Failed to remove block from inventory");
+          }
+        } else {
+          console.log("Block already exists at this position");
+        }
+      } else {
+        console.log(`Block placement too far (${distance} > ${this.maxPlaceDistance})`);
+      }
+    }
+  }
+
+  /**
+   * Update the player's UI elements
+   */
+  updateUI() {
+    // Update mode indicator
+    if (this.uiElements.modeIndicator) {
+      this.uiElements.modeIndicator.textContent = this.mode === 'ship' ? 'Ship Mode' : 'Player Mode';
+    }
+    
+    // Update stats
+    if (this.uiElements.stats) {
+      this.uiElements.stats.textContent = `${this.username} | Kills: ${this.kills} | Deaths: ${this.deaths}`;
+    }
+    
+    // Update inventory visibility
+    if (this.uiElements.inventory) {
+      this.uiElements.inventory.style.display = this.mode === 'player' ? 'block' : 'none';
+    }
+    
+    // Update inventory slots
+    this.updateInventoryUI();
+  }
+
+  /**
+   * Update the inventory UI
+   */
+  updateInventoryUI() {
+    console.log("Updating inventory UI");
+    console.log(`Current selected slot: ${this.inventory.selectedSlot + 1}`);
+    
+    // Get the inventory container
+    const inventoryContainer = document.getElementById('inventory');
+    if (!inventoryContainer) {
+      console.error("Inventory container not found");
+      return;
+    }
+    
+    console.log(`Clearing inventory container with ${inventoryContainer.children.length} children`);
+    
+    // Clear existing slots
+    inventoryContainer.innerHTML = '';
+    
+    // Create slots
+    for (let i = 0; i < this.inventory.slots.length; i++) {
+      const slot = document.createElement('div');
+      slot.className = 'inventory-slot';
+      slot.dataset.slot = i;
+      
+      // Mark as selected if this is the selected slot
+      if (i === this.inventory.selectedSlot) {
+        slot.classList.add('selected');
+        console.log(`Marking slot ${i + 1} as selected (selectedSlot = ${this.inventory.selectedSlot + 1})`);
+      }
+      
+      // Add slot number
+      const slotNumber = document.createElement('div');
+      slotNumber.className = 'slot-number';
+      slotNumber.textContent = (i + 1).toString();
+      slot.appendChild(slotNumber);
+      
+      // Add item if slot is not empty
+      const item = this.inventory.slots[i];
+      if (item) {
+        // Create item element
+        const itemElement = document.createElement('div');
+        itemElement.className = 'inventory-item';
+        
+        // Try to set background image using the resource loader
+        let textureApplied = false;
+        try {
+          const resourceLoader = window.resourceLoader;
+          if (resourceLoader && typeof resourceLoader.getUrl === 'function') {
+            const textureUrl = resourceLoader.getUrl(item.type);
+            if (textureUrl) {
+              // Use the texture URL directly
+              itemElement.style.backgroundImage = `url(${textureUrl})`;
+              itemElement.style.backgroundSize = '80%'; // Slightly smaller for better appearance
+              itemElement.style.backgroundPosition = 'center';
+              itemElement.style.backgroundRepeat = 'no-repeat';
+              textureApplied = true;
+              
+              // Add a subtle border and shadow for 3D effect even with texture
+              itemElement.style.border = '1px solid rgba(255,255,255,0.3)';
+              itemElement.style.boxShadow = 'inset 0 0 8px rgba(0, 0, 0, 0.3)';
+            } else {
+              console.warn(`No texture URL found for ${item.type}`);
+            }
+          } else {
+            console.warn('Resource loader or getUrl method not available');
+          }
+        } catch (error) {
+          console.warn(`Failed to load texture for ${item.type}:`, error);
+        }
+        
+        // If texture loading failed, use a color fallback with a 3D-like appearance
+        if (!textureApplied) {
+          let backgroundColor;
+          let borderTopColor;
+          let borderLeftColor;
+          let borderRightColor;
+          let borderBottomColor;
+          let itemIcon = '';
+          
+          switch (item.type) {
+            case 'wood':
+              backgroundColor = '#8B4513';
+              borderTopColor = '#A0522D';
+              borderLeftColor = '#A0522D';
+              borderRightColor = '#654321';
+              borderBottomColor = '#654321';
+              itemIcon = '🪵';
+              break;
+            case 'stone':
+              backgroundColor = '#808080';
+              borderTopColor = '#A0A0A0';
+              borderLeftColor = '#A0A0A0';
+              borderRightColor = '#606060';
+              borderBottomColor = '#606060';
+              itemIcon = '🧱';
+              break;
+            case 'lift':
+              backgroundColor = '#FFD700';
+              borderTopColor = '#FFF700';
+              borderLeftColor = '#FFF700';
+              borderRightColor = '#DAA520';
+              borderBottomColor = '#DAA520';
+              itemIcon = '🎈';
+              break;
+            case 'cannon':
+              backgroundColor = '#696969';
+              borderTopColor = '#808080';
+              borderLeftColor = '#808080';
+              borderRightColor = '#505050';
+              borderBottomColor = '#505050';
+              itemIcon = '💣';
+              break;
+            case 'control':
+              backgroundColor = '#8B0000';
+              borderTopColor = '#A52A2A';
+              borderLeftColor = '#A52A2A';
+              borderRightColor = '#800000';
+              borderBottomColor = '#800000';
+              itemIcon = '🎮';
+              break;
+            default:
+              backgroundColor = '#AAAAAA';
+              borderTopColor = '#CCCCCC';
+              borderLeftColor = '#CCCCCC';
+              borderRightColor = '#888888';
+              borderBottomColor = '#888888';
+              itemIcon = '📦';
+              break;
+          }
+          
+          // Apply 3D-like styles
+          itemElement.style.backgroundColor = backgroundColor;
+          itemElement.style.borderTop = `2px solid ${borderTopColor}`;
+          itemElement.style.borderLeft = `2px solid ${borderLeftColor}`;
+          itemElement.style.borderRight = `2px solid ${borderRightColor}`;
+          itemElement.style.borderBottom = `2px solid ${borderBottomColor}`;
+          itemElement.style.boxShadow = 'inset 0 0 10px rgba(0, 0, 0, 0.4)';
+          
+          // Add icon as fallback
+          if (itemIcon) {
+            const iconElement = document.createElement('div');
+            iconElement.className = 'item-icon';
+            iconElement.textContent = itemIcon;
+            iconElement.style.fontSize = '24px';
+            iconElement.style.textAlign = 'center';
+            iconElement.style.lineHeight = '40px';
+            itemElement.appendChild(iconElement);
+          }
+        }
+        
+        // Add item count if more than 1
+        if (item.count > 1) {
+          const countElement = document.createElement('div');
+          countElement.className = 'item-count';
+          countElement.textContent = item.count.toString();
+          countElement.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+          countElement.style.color = 'white';
+          countElement.style.borderRadius = '50%';
+          countElement.style.padding = '2px 6px';
+          countElement.style.position = 'absolute';
+          countElement.style.bottom = '2px';
+          countElement.style.right = '2px';
+          countElement.style.fontSize = '12px';
+          countElement.style.fontWeight = 'bold';
+          itemElement.appendChild(countElement);
+        }
+        
+        // Add item name tooltip
+        itemElement.title = `${item.type.charAt(0).toUpperCase() + item.type.slice(1)} (${item.count})`;
+        
+        // Add item to slot
+        slot.appendChild(itemElement);
+      }
+      
+      // Add click event to select this slot
+      slot.addEventListener('click', () => {
+        this.selectInventorySlot(i);
+      });
+      
+      // Add slot to inventory container
+      inventoryContainer.appendChild(slot);
+    }
+    
+    // Update body class based on mode
+    document.body.classList.remove('player-mode', 'ship-mode');
+    document.body.classList.add(`${this.mode}-mode`);
+  }
+
+  /**
+   * Update the camera position and rotation
+   */
+  updateCamera() {
+    try {
+      if (!this.camera) return;
+      
+      if (this.mode === 'ship') {
+        // Ship Mode - Third-person camera following the ship
+        if (this.ship) {
+          try {
+            const { position, target } = this.ship.getCameraPositionAndTarget();
+            
+            this.camera.position.set(position.x, position.y, position.z);
+            this.camera.lookAt(target.x, target.y, target.z);
+          } catch (error) {
+            console.error('Error updating ship camera:', error);
+            
+            // Fallback camera position
+            this.camera.position.set(0, 60, 20);
+            this.camera.lookAt(0, 50, 0);
+          }
+        }
+      } else {
+        // Player Mode - First-person camera
+        this.camera.position.set(
+          this.character.position.x,
+          this.character.position.y + 1.6, // Eye level
+          this.character.position.z
+        );
+        
+        // Apply camera rotation
+        this.camera.rotation.order = 'YXZ';
+        this.camera.rotation.x = this.cameraRotation.x;
+        this.camera.rotation.y = this.cameraRotation.y;
+        this.camera.rotation.z = 0;
+      }
+    } catch (error) {
+      console.error('Error in updateCamera:', error);
+    }
+  }
+
+  /**
+   * Update the player's character position and physics
+   * @param {Number} deltaTime - Time since last frame in seconds
+   */
+  updateCharacter(deltaTime) {
+    if (this.mode !== 'player') return;
+    
+    // Apply gravity
+    this.character.velocity.y -= 9.8 * deltaTime;
+    
+    // Apply movement based on controls
+    const moveSpeed = this.character.isSneaking ? 2 : 4;
+    const moveVector = new THREE.Vector3(0, 0, 0);
+    
+    if (this.controls.forward) moveVector.z -= 1;
+    if (this.controls.backward) moveVector.z += 1;
+    if (this.controls.left) moveVector.x -= 1;
+    if (this.controls.right) moveVector.x += 1;
+    
+    // Normalize movement vector
+    if (moveVector.length() > 0) {
+      moveVector.normalize().multiplyScalar(moveSpeed * deltaTime);
+    }
+    
+    // Apply rotation to movement
+    moveVector.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.character.rotation);
+    
+    // Apply movement to velocity
+    this.character.velocity.x = moveVector.x;
+    this.character.velocity.z = moveVector.z;
+    
+    // Apply jumping
+    if (this.controls.jump && !this.character.isJumping) {
+      this.character.velocity.y = 5;
+      this.character.isJumping = true;
+    }
+    
+    // Apply sneaking
+    this.character.isSneaking = this.controls.sneak;
+    
+    // Update position
+    this.character.position.x += this.character.velocity.x;
+    this.character.position.y += this.character.velocity.y * deltaTime;
+    this.character.position.z += this.character.velocity.z;
+    
+    // Collision detection with ship blocks
+    // (Simplified - in a full implementation, this would be more complex)
+    
+    // Keep character on the ship
+    if (this.ship) {
+      // Check if character is too far from steering wheel
+      const steeringWheelPos = this.ship.steeringWheel ? 
+        this.ship.getBlockWorldPosition(this.ship.steeringWheel) : 
+        this.ship.position;
+      
+      const distanceFromWheel = Math.sqrt(
+        Math.pow(this.character.position.x - steeringWheelPos.x, 2) +
+        Math.pow(this.character.position.z - steeringWheelPos.z, 2)
+      );
+      
+      if (distanceFromWheel > 25) {
+        // Teleport back to steering wheel
+        this.character.position = { ...steeringWheelPos };
+        this.character.position.y += 1; // Stand on top of the steering wheel
+        this.character.velocity = { x: 0, y: 0, z: 0 };
+        this.character.isJumping = false;
+      }
+      
+      // Move with the ship
+      this.character.position.x += this.ship.velocity.x * deltaTime;
+      this.character.position.y += this.ship.velocity.y * deltaTime;
+      this.character.position.z += this.ship.velocity.z * deltaTime;
+    }
+    
+    // Update character mesh position
+    if (this.character.mesh) {
+      this.character.mesh.position.set(
+        this.character.position.x,
+        this.character.position.y,
+        this.character.position.z
+      );
+    }
+  }
+
+  /**
+   * Update the player
+   * @param {Number} deltaTime - Time since last frame in seconds
+   * @param {THREE.Scene} scene - The Three.js scene
+   */
+  update(deltaTime, scene) {
+    try {
+      // Update ship controls in Ship Mode
+      if (this.mode === 'ship' && this.ship) {
+        try {
+          this.ship.applyThrust(this.controls);
+          
+          // Fire cannons
+          if (this.controls.fire) {
+            // Determine which direction to fire based on movement controls
+            let fireDirection = null;
+            
+            if (this.controls.forward) {
+              fireDirection = 'forward';
+            } else if (this.controls.backward) {
+              fireDirection = 'backward';
+            } else if (this.controls.left) {
+              fireDirection = 'left';
+            } else if (this.controls.right) {
+              fireDirection = 'right';
+            }
+            
+            if (fireDirection) {
+              this.ship.fireCannons(fireDirection, scene);
+              this.controls.fire = false; // Reset fire control to prevent continuous firing
+            }
+          }
+        } catch (error) {
+          console.error('Error updating ship controls:', error);
+        }
+      }
+      
+      // Update ship
+      if (this.ship) {
+        try {
+          // In player mode, ensure the ship doesn't sink
+          if (this.mode === 'player') {
+            // Save the original isSinking state
+            const originalIsSinking = this.ship.isSinking;
+            
+            // Force the ship to not sink in player mode
+            this.ship.isSinking = false;
+            
+            // Update the ship
+            this.ship.update(deltaTime);
+            
+            // Restore the original isSinking state for when we switch back to ship mode
+            this.ship.isSinking = originalIsSinking;
+          } else {
+            // Normal update in ship mode
+            this.ship.update(deltaTime);
+          }
+        } catch (error) {
+          console.error('Error updating ship:', error);
+        }
+      }
+      
+      // Update character in Player Mode
+      if (this.mode === 'player') {
+        try {
+          this.updateCharacter(deltaTime);
+        } catch (error) {
+          console.error('Error updating character:', error);
+        }
+      }
+      
+      // Update camera
+      try {
+        this.updateCamera();
+      } catch (error) {
+        console.error('Error updating camera:', error);
+      }
+      
+      // Update UI
+      try {
+        this.updateUI();
+      } catch (error) {
+        console.error('Error updating UI:', error);
+      }
+    } catch (error) {
+      console.error('Error in player update:', error);
+    }
+  }
+
+  /**
+   * Save the inventory state to local storage
+   */
+  saveInventory() {
+    if (this.username) {
+      try {
+        // Create a serializable version of the inventory
+        const inventoryData = {
+          slots: this.inventory.slots,
+          selectedSlot: this.inventory.selectedSlot,
+          maxStackSize: this.inventory.maxStackSize,
+          infiniteBlocks: this.inventory.infiniteBlocks
+        };
+        
+        // Save to local storage
+        localStorage.setItem(`inventory_${this.username}`, JSON.stringify(inventoryData));
+        console.log("Inventory saved to localStorage");
+      } catch (error) {
+        console.error("Error saving inventory to localStorage:", error);
+      }
+    }
+  }
+  
+  /**
+   * Load the inventory state from local storage
+   * @returns {Boolean} - Whether the inventory was successfully loaded
+   */
+  loadInventory() {
+    if (this.username) {
+      try {
+        // Get from local storage
+        const inventoryData = localStorage.getItem(`inventory_${this.username}`);
+        
+        if (inventoryData) {
+          // Parse the data
+          const parsedData = JSON.parse(inventoryData);
+          
+          // Update the inventory
+          this.inventory.slots = parsedData.slots;
+          this.inventory.selectedSlot = parsedData.selectedSlot;
+          this.inventory.maxStackSize = parsedData.maxStackSize;
+          this.inventory.infiniteBlocks = parsedData.infiniteBlocks !== undefined ? 
+            parsedData.infiniteBlocks : true; // Default to true if not specified
+          
+          // Update the UI
+          this.updateInventoryUI();
+          
+          console.log("Inventory loaded from localStorage");
+          return true;
+        }
+      } catch (error) {
+        console.error("Error loading inventory from localStorage:", error);
+      }
+    }
+    
+    return false;
+  }
+}
+
+export default Player; 

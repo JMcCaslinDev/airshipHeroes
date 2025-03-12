@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Airship Skirmish</title>
+  <link rel="stylesheet" href="./src/styles/main.css">
+  <script type="module" src="./src/main.js"></script>
+  <script>
+    // Fallback to show login screen if resources don't load within 5 seconds
+    window.addEventListener('load', function() {
+      setTimeout(function() {
+        const loadingScreen = document.getElementById('loading-screen');
+        const loginScreen = document.getElementById('login-screen');
+        
+        if (loadingScreen && loadingScreen.style.display !== 'none') {
+          console.log('Fallback: Hiding loading screen and showing login screen');
+          loadingScreen.style.display = 'none';
+          if (loginScreen) {
+            loginScreen.style.display = 'flex';
+          }
+        }
+      }, 5000);
+    });
+  </script>
+</head>
+<body>
+  <!-- Loading Screen -->
+  <div id="loading-screen" class="fullscreen-overlay">
+    <div class="loading-container">
+      <h1>Airship Skirmish</h1>
+      <div class="loading-progress">
+        <div id="loading-progress-bar"></div>
+      </div>
+      <p id="loading-text">Loading resources...</p>
+    </div>
+  </div>
+
+  <!-- Login Screen -->
+  <div id="login-screen" class="fullscreen-overlay" style="display: none;">
+    <div class="login-container">
+      <h1>Airship Skirmish</h1>
+      <form id="login-form">
+        <div class="form-group">
+          <label for="username-input">Username</label>
+          <input type="text" id="username-input" placeholder="Enter your username" required>
+        </div>
+        <button type="submit" class="primary-button">Play</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Death Screen -->
+  <div id="death-screen" class="fullscreen-overlay" style="display: none;">
+    <div class="death-container">
+      <h1>You Died!</h1>
+      <p>Your ship was destroyed.</p>
+      <button id="respawn-button" class="primary-button">Respawn</button>
+    </div>
+  </div>
+
+  <!-- Game Canvas -->
+  <canvas id="game-canvas"></canvas>
+
+  <!-- HUD -->
+  <div id="hud" style="display: none;">
+    <div id="top-hud">
+      <div id="mode-indicator">Ship Mode</div>
+      <div id="fps-counter">FPS: 0</div>
+    </div>
+    <div id="ship-stats" class="stats-panel">
+      <h3>Ship Stats</h3>
+      <div class="stats-content">
+        <div class="stat-row">
+          <span class="stat-label">Position:</span>
+          <span id="ship-position" class="stat-value">X: 0, Y: 0, Z: 0</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Altitude:</span>
+          <span id="ship-altitude" class="stat-value">0 m</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Speed:</span>
+          <span id="ship-speed" class="stat-value">0 mph</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Max Speed:</span>
+          <span id="ship-max-speed" class="stat-value">0 mph</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Total Blocks:</span>
+          <span id="ship-total-blocks" class="stat-value">0</span>
+        </div>
+        <div id="block-type-stats">
+          <!-- Block type stats will be added dynamically -->
+        </div>
+      </div>
+    </div>
+    <div id="bottom-hud">
+      <div id="inventory">
+        <!-- Inventory slots will be generated dynamically -->
+      </div>
+    </div>
+    <div id="crosshair"></div>
+  </div>
+</body>
+</html> 
