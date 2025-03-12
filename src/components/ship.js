@@ -337,15 +337,24 @@ class Ship {
     // Apply bobbing motion when not moving
     const isMoving = Math.abs(this.velocity.x) > 0.1 || Math.abs(this.velocity.z) > 0.1;
     if (!isMoving && !this.isSinking) {
+      // Store the base Y position if we don't have one yet
+      if (!this.baseY) {
+        this.baseY = this.position.y;
+      }
+      
       // Calculate bobbing based on time
       const time = performance.now() / 1000; // Current time in seconds
-      const bobAmount = Math.sin(time * 0.5) * 0.05; // Gentle bobbing
+      // Faster, subtle bobbing for airship/balloon-like motion
+      const bobOffset = Math.sin(time * 0.7) * 0.5; // Faster, subtle bobbing effect with 0.5 block amplitude
       
-      // Apply bobbing to position
-      this.position.y += bobAmount;
+      // Set position directly based on base position plus offset
+      this.position.y = this.baseY + bobOffset;
       
-      // Make neutrally buoyant (counteract gravity)
-      this.velocity.y *= 0.9; // Dampen vertical velocity
+      // Reset velocity since we're directly setting position
+      this.velocity.y = 0;
+    } else {
+      // Reset baseY when moving so it can be recalculated when stopped
+      this.baseY = null;
     }
     
     // Apply gravity if sinking
