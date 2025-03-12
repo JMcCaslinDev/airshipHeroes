@@ -1489,6 +1489,26 @@ class Player {
       // Update ship controls in Ship Mode
       if (this.mode === 'ship' && this.ship) {
         try {
+          // DIRECT VERTICAL MOVEMENT: Handle Q and E keys directly
+          if (this.controls.up) {
+            console.log("PLAYER CLASS: Direct UP movement");
+            // Move up at exactly 1 unit per second
+            this.ship.position.y += 1 * deltaTime;
+            if (this.ship.group) {
+              this.ship.group.position.y = this.ship.position.y;
+              console.log(`Ship Y position: ${this.ship.position.y}`);
+            }
+          } else if (this.controls.down) {
+            console.log("PLAYER CLASS: Direct DOWN movement");
+            // Move down at exactly 1 unit per second
+            this.ship.position.y -= 1 * deltaTime;
+            if (this.ship.group) {
+              this.ship.group.position.y = this.ship.position.y;
+              console.log(`Ship Y position: ${this.ship.position.y}`);
+            }
+          }
+          
+          // Apply thrust for horizontal movement only
           this.ship.applyThrust(this.controls);
           
           // Fire cannons

@@ -53,6 +53,9 @@ export function createShipModeController(player, camera, world) {
   function handleInput(keys) {
     if (!active || !player.ship) return;
     
+    // Debug log for all keys
+    console.log("Ship mode input handler - All keys:", JSON.stringify(keys));
+    
     // Set ship controls
     player.ship.controls = {
       forward: keys.forward || keys.w,
@@ -62,6 +65,9 @@ export function createShipModeController(player, camera, world) {
       up: keys.q,
       down: keys.e
     };
+    
+    // Debug log to verify Q and E key states
+    console.log(`Ship controls - Q: ${keys.q}, E: ${keys.e}, Up: ${player.ship.controls.up}, Down: ${player.ship.controls.down}`);
     
     // Fire cannons
     if (keys.fire) {
@@ -205,6 +211,9 @@ export function createShipModeController(player, camera, world) {
    */
   function update(deltaTime) {
     if (!active || !player.ship) return;
+    
+    // Vertical movement is now handled directly in the Player class
+    // We're not handling it here anymore to avoid conflicts
     
     // Update ship physics
     updateShipPhysics(player.ship, world, deltaTime);

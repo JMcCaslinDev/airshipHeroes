@@ -59,6 +59,7 @@ const inputHandler = createInputHandler({
     }
   }
 });
+// Make input handler accessible globally
 const resourceLoader = createResourceLoader({
   onProgress: updateLoadingProgress,
   onComplete: onResourcesLoaded

@@ -241,19 +241,14 @@ class Ship {
       }
     }
     
-    // Apply vertical movement directly (not affected by rotation)
-    if (controls.up) {
-      this.velocity.y += 1;
-    } else if (controls.down) {
-      this.velocity.y -= 1;
-    }
+    // Store controls for use in update method
+    this.controls = controls;
     
     // Cap velocities
     const maxSpeed = 5;
     const maxAngularSpeed = Math.PI / 2; // 90 degrees per second
     
     this.velocity.x = Math.max(-maxSpeed, Math.min(maxSpeed, this.velocity.x));
-    this.velocity.y = Math.max(-maxSpeed, Math.min(maxSpeed, this.velocity.y));
     this.velocity.z = Math.max(-maxSpeed, Math.min(maxSpeed, this.velocity.z));
     this.angularVelocity = Math.max(-maxAngularSpeed, Math.min(maxAngularSpeed, this.angularVelocity));
   }
@@ -320,6 +315,9 @@ class Ship {
    * @param {number} worldHeight - The maximum height of the world
    */
   update(deltaTime, worldHeight = 500) {
+    // Handle vertical movement directly from controls - SIMPLIFIED
+    // We're now handling this in the Player class, so this is just a backup
+    
     // Apply physics
     this.position.x += this.velocity.x * deltaTime;
     this.position.y += this.velocity.y * deltaTime;
@@ -334,9 +332,11 @@ class Ship {
     this.velocity.z *= drag;
     this.angularVelocity *= drag;
     
-    // Apply bobbing motion when not moving
+    // Apply bobbing motion when not moving AND not actively changing altitude
     const isMoving = Math.abs(this.velocity.x) > 0.1 || Math.abs(this.velocity.z) > 0.1;
-    if (!isMoving && !this.isSinking) {
+    const isChangingAltitude = this.controls && (this.controls.up || this.controls.down);
+    
+    if (!isMoving && !isChangingAltitude && !this.isSinking) {
       // Store the base Y position if we don't have one yet
       if (!this.baseY) {
         this.baseY = this.position.y;

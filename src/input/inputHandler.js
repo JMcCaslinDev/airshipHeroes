@@ -154,9 +154,11 @@ export function createInputHandler(options = {}) {
         break;
       case 'KeyQ':
         keys.q = isDown;
+        console.log(`Q key ${isDown ? 'pressed' : 'released'}`);
         break;
       case 'KeyE':
         keys.e = isDown;
+        console.log(`E key ${isDown ? 'pressed' : 'released'}`);
         break;
       case 'KeyR':
         keys.fire = isDown;

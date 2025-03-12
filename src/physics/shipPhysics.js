@@ -59,17 +59,11 @@ export function updateShipPhysics(ship, worldManager, deltaTime) {
       thrustForce.z -= THRUST * deltaTime;
     }
     
-    // Apply vertical thrust
-    if (ship.controls.up) {
-      thrustForce.y += THRUST * deltaTime;
-    }
-    
-    if (ship.controls.down) {
-      thrustForce.y -= THRUST * deltaTime;
-    }
+    // Apply vertical thrust - handled directly in Player class
+    // We're not handling vertical movement here anymore to avoid conflicts
     
     // Apply thrust in the direction the ship is facing
-    if (thrustForce.z !== 0 || thrustForce.y !== 0) {
+    if (thrustForce.z !== 0) {
       const rotatedForce = rotateForce(thrustForce, ship.rotation);
       applyForce(ship, rotatedForce);
     }
@@ -87,7 +81,8 @@ export function updateShipPhysics(ship, worldManager, deltaTime) {
   // Apply drag
   const dragForce = {
     x: -ship.velocity.x * DRAG * deltaTime,
-    y: -ship.velocity.y * DRAG * 0.1 * deltaTime, // Less drag in vertical direction
+    // Only apply vertical drag if neither up nor down is pressed
+    y: (ship.controls && (ship.controls.up || ship.controls.down)) ? 0 : -ship.velocity.y * DRAG * 0.1 * deltaTime,
     z: -ship.velocity.z * DRAG * deltaTime
   };
   
@@ -99,6 +94,11 @@ export function updateShipPhysics(ship, worldManager, deltaTime) {
   
   // Check for collisions
   checkCollisions(ship, worldManager);
+  
+  // Debug log to verify ship position
+  if (ship.controls && (ship.controls.up || ship.controls.down)) {
+    console.log(`End of update cycle - Ship Y: ${ship.position.y}, Group Y: ${ship.group ? ship.group.position.y : 'no group'}`);
+  }
 }
 
 /**
@@ -127,9 +127,15 @@ export function applyTorque(ship, torque) {
  * @param {number} deltaTime - The time since the last update in seconds
  */
 export function updatePosition(ship, deltaTime) {
-  // Update position based on velocity
+  // Update position based on velocity, but don't override vertical position if controls are active
   ship.position.x += ship.velocity.x * deltaTime;
-  ship.position.y += ship.velocity.y * deltaTime;
+  
+  // Only update Y position if not actively changing altitude with controls
+  const isChangingAltitude = ship.controls && (ship.controls.up || ship.controls.down);
+  if (!isChangingAltitude) {
+    ship.position.y += ship.velocity.y * deltaTime;
+  }
+  
   ship.position.z += ship.velocity.z * deltaTime;
   
   // Update group position
