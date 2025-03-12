@@ -1370,10 +1370,14 @@ class Player {
         );
         
         // Apply camera rotation
-        this.camera.rotation.order = 'YXZ';
+        this.camera.rotation.order = 'YXZ'; // This order is important for first-person controls
         this.camera.rotation.x = this.cameraRotation.x;
         this.camera.rotation.y = this.cameraRotation.y;
         this.camera.rotation.z = 0;
+        
+        // Update the camera's matrices to ensure they're current
+        this.camera.updateProjectionMatrix();
+        this.camera.updateMatrixWorld();
       }
     } catch (error) {
       console.error('Error in updateCamera:', error);
@@ -1392,24 +1396,35 @@ class Player {
     
     // Apply movement based on controls
     const moveSpeed = this.character.isSneaking ? 1 : 2;
-    const moveVector = new THREE.Vector3(0, 0, 0);
     
-    if (this.controls.forward) moveVector.z -= 1;
-    if (this.controls.backward) moveVector.z += 1;
-    if (this.controls.left) moveVector.x -= 1;
-    if (this.controls.right) moveVector.x += 1;
+    // Create direction vectors based on camera orientation
+    const forward = new THREE.Vector3(0, 0, -1);
+    const right = new THREE.Vector3(1, 0, 0);
     
-    // Normalize movement vector
-    if (moveVector.length() > 0) {
-      moveVector.normalize().multiplyScalar(moveSpeed * deltaTime);
+    // Apply character rotation to these vectors
+    forward.applyEuler(new THREE.Euler(0, this.character.rotation, 0, 'YXZ'));
+    right.applyEuler(new THREE.Euler(0, this.character.rotation, 0, 'YXZ'));
+    
+    // Calculate final movement direction
+    const finalDirection = new THREE.Vector3(0, 0, 0);
+    
+    if (this.controls.forward) finalDirection.add(forward);
+    if (this.controls.backward) finalDirection.sub(forward);
+    if (this.controls.right) finalDirection.add(right);
+    if (this.controls.left) finalDirection.sub(right);
+    
+    // Apply movement
+    if (finalDirection.length() > 0) {
+      finalDirection.normalize().multiplyScalar(moveSpeed * deltaTime);
+      
+      // Apply movement to velocity
+      this.character.velocity.x = finalDirection.x;
+      this.character.velocity.z = finalDirection.z;
+    } else {
+      // Stop horizontal movement
+      this.character.velocity.x = 0;
+      this.character.velocity.z = 0;
     }
-    
-    // Apply rotation to movement
-    moveVector.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.character.rotation);
-    
-    // Apply movement to velocity
-    this.character.velocity.x = moveVector.x;
-    this.character.velocity.z = moveVector.z;
     
     // Apply jumping
     if (this.controls.jump && !this.character.isJumping) {

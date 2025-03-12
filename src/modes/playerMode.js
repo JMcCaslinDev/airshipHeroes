@@ -25,7 +25,7 @@ export function createPlayerModeController(player, camera) {
     
     // Physics constants
     gravity: 9.8,
-    jumpVelocity: 5,
+    jumpVelocity: 8.0,
     moveSpeed: 2.5,
     
     // Raycaster for block placement and breaking
@@ -43,6 +43,10 @@ export function createPlayerModeController(player, camera) {
     player.mode = 'player';
     
     console.log('Activating player mode');
+    
+    // Sync camera rotation with player's camera rotation
+    state.cameraRotation.x = player.cameraRotation.x;
+    state.cameraRotation.y = player.cameraRotation.y;
     
     // Show character mesh
     if (player.character && player.character.mesh) {
@@ -185,12 +189,34 @@ export function createPlayerModeController(player, camera) {
     if (moveDirection.length() > 0) {
       moveDirection.normalize();
       
-      // Rotate movement direction based on camera rotation
-      moveDirection.applyAxisAngle(new THREE.Vector3(0, 1, 0), state.cameraRotation.y);
+      // Create a direction vector based on camera orientation
+      const forward = new THREE.Vector3(0, 0, -1);
+      const right = new THREE.Vector3(1, 0, 0);
       
-      // Apply movement
-      player.character.velocity.x = moveDirection.x * state.moveSpeed;
-      player.character.velocity.z = moveDirection.z * state.moveSpeed;
+      // Apply camera rotation to these vectors
+      forward.applyEuler(new THREE.Euler(0, state.cameraRotation.y, 0, 'YXZ'));
+      right.applyEuler(new THREE.Euler(0, state.cameraRotation.y, 0, 'YXZ'));
+      
+      // Calculate final movement direction
+      const finalDirection = new THREE.Vector3(0, 0, 0);
+      
+      if (keys.forward) finalDirection.add(forward);
+      if (keys.backward) finalDirection.sub(forward);
+      if (keys.right) finalDirection.add(right);
+      if (keys.left) finalDirection.sub(right);
+      
+      // Normalize and scale by move speed
+      if (finalDirection.length() > 0) {
+        finalDirection.normalize().multiplyScalar(state.moveSpeed);
+        
+        // Apply movement
+        player.character.velocity.x = finalDirection.x;
+        player.character.velocity.z = finalDirection.z;
+      } else {
+        // Stop horizontal movement
+        player.character.velocity.x = 0;
+        player.character.velocity.z = 0;
+      }
     } else {
       // Stop horizontal movement
       player.character.velocity.x = 0;
@@ -281,6 +307,10 @@ export function createPlayerModeController(player, camera) {
     // Update character rotation
     player.character.rotation = state.cameraRotation.y;
     player.character.mesh.rotation.y = state.cameraRotation.y;
+    
+    // Sync with player's camera rotation
+    player.cameraRotation.x = state.cameraRotation.x;
+    player.cameraRotation.y = state.cameraRotation.y;
     
     // Update camera
     updateCamera();
@@ -545,10 +575,14 @@ export function createPlayerModeController(player, camera) {
     state.camera.position.z = player.character.position.z;
     
     // Set camera rotation
-    state.camera.rotation.order = 'YXZ';
+    state.camera.rotation.order = 'YXZ'; // This order is important for first-person controls
     state.camera.rotation.x = state.cameraRotation.x;
     state.camera.rotation.y = state.cameraRotation.y;
     state.camera.rotation.z = 0;
+    
+    // Update the camera's direction vectors to ensure they're current
+    state.camera.updateProjectionMatrix();
+    state.camera.updateMatrixWorld();
   }
   
   /**
