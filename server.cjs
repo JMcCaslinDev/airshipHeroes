@@ -19,12 +19,16 @@ dotenv.config();
 
 // Get configuration from environment variables
 const PORT = process.env.PORT || 3001;
+const WS_PORT = process.env.VITE_WS_PORT || PORT; // Use WebSocket port if specified
 const MAX_PLAYERS = parseInt(process.env.MAX_PLAYERS || 100);
 const WORLD_SIZE = parseInt(process.env.WORLD_SIZE || 1000);
 const WORLD_HEIGHT = parseInt(process.env.WORLD_HEIGHT || 500);
 const SAVE_INTERVAL = parseInt(process.env.SAVE_INTERVAL || 60000);
 const WEBSOCKET_PING_INTERVAL = parseInt(process.env.WEBSOCKET_PING_INTERVAL || 10000);
 const WEBSOCKET_PING_TIMEOUT = parseInt(process.env.WEBSOCKET_PING_TIMEOUT || 5000);
+
+console.log(`Starting server on port ${PORT}`);
+console.log(`WebSocket configured for port ${WS_PORT}`);
 
 // Create Express app
 const app = express();
@@ -39,7 +43,8 @@ const io = new Server(server, {
   pingInterval: WEBSOCKET_PING_INTERVAL,
   pingTimeout: WEBSOCKET_PING_TIMEOUT,
   transports: ['websocket'],
-  maxHttpBufferSize: 1e6 // 1MB max message size
+  maxHttpBufferSize: 1e6, // 1MB max message size
+  connectTimeout: 10000 // 10 seconds connection timeout
 });
 
 // Use compression middleware to reduce bandwidth
@@ -303,8 +308,10 @@ setInterval(() => {
 // Start server
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  console.log(`Max players: ${MAX_PLAYERS}`);
-  console.log(`World size: ${WORLD_SIZE}x${WORLD_SIZE}x${WORLD_HEIGHT}`);
+  console.log(`WebSocket server available at ws://localhost:${PORT}`);
+  console.log(`Maximum players: ${MAX_PLAYERS}`);
+  console.log(`World size: ${WORLD_SIZE}x${WORLD_SIZE}`);
+  console.log(`World height: ${WORLD_HEIGHT}`);
 });
 
 // Handle graceful shutdown

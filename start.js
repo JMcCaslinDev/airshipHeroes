@@ -6,12 +6,21 @@
 
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
-import { dirname } from 'path';
+import { dirname, resolve } from 'path';
 import fs from 'fs';
+import dotenv from 'dotenv';
 
 // Get the current file's directory
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// Load environment variables
+dotenv.config();
+
+// Get port configuration from environment variables
+const VITE_PORT = process.env.VITE_PORT || 3000;
+const SERVER_PORT = process.env.PORT || 3001;
+const WS_PORT = process.env.VITE_WS_PORT || 3002;
 
 // Colors for console output
 const colors = {
@@ -35,17 +44,20 @@ ${colors.bright}${colors.cyan}╔═══════════════�
 ╚═══════════════════════════════════════════════════════════╝${colors.reset}
 `);
 
+console.log(`${colors.yellow}Using ports: Vite=${VITE_PORT}, Server=${SERVER_PORT}, WebSocket=${WS_PORT}${colors.reset}`);
+
 // Start Vite development server
 const viteProcess = spawn('npx', ['vite'], {
   stdio: 'pipe',
-  shell: true
+  shell: true,
+  env: { ...process.env }
 });
 
 // Start multiplayer server
 const serverProcess = spawn('node', ['server.cjs'], {
   stdio: 'pipe',
   shell: true,
-  env: { ...process.env, PORT: '3001' }
+  env: { ...process.env }
 });
 
 // Handle Vite output
