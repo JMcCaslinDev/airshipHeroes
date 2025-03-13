@@ -141,25 +141,60 @@ class Ship {
     const index = this.blocks.indexOf(block);
     
     if (index === -1) {
+      console.warn('Block not found in ship blocks array');
+      
+      // Try to find the block by position
+      const blockByPosition = this.blocks.find(b => 
+        b.position.x === block.position.x && 
+        b.position.y === block.position.y && 
+        b.position.z === block.position.z
+      );
+      
+      if (blockByPosition) {
+        console.log('Found block by position instead');
+        return this.removeBlock(blockByPosition);
+      }
+      
       return false;
     }
     
-    // Don't allow removing the steering wheel
-    if (block.type === 'steeringWheel') {
-      console.warn('Cannot remove the steering wheel');
+    // Don't allow removing the steering wheel or control block
+    if (block.type === 'steeringWheel' || block.type === 'control') {
+      console.warn('Cannot remove the steering wheel or control block');
       return false;
     }
     
-    // Remove the block
+    // Remove the block from the blocks array
     this.blocks.splice(index, 1);
     
     // Remove the mesh from the group
-    if (block.mesh && block.mesh.parent) {
-      block.mesh.parent.remove(block.mesh);
+    if (block.mesh) {
+      if (block.mesh.parent) {
+        block.mesh.parent.remove(block.mesh);
+      }
+      
+      // Dispose of geometry and materials to prevent memory leaks
+      if (block.mesh.geometry) {
+        block.mesh.geometry.dispose();
+      }
+      
+      if (block.mesh.material) {
+        if (Array.isArray(block.mesh.material)) {
+          block.mesh.material.forEach(material => material.dispose());
+        } else {
+          block.mesh.material.dispose();
+        }
+      }
+      
+      // Clear references
+      block.mesh.userData = {};
+      block.mesh = null;
     }
     
     // Check if the ship has enough lift
     this.checkLift();
+    
+    console.log(`Block removed from ship at position: ${block.position.x}, ${block.position.y}, ${block.position.z}`);
     
     return true;
   }
@@ -416,6 +451,17 @@ class Ship {
     if (this.steeringWheel) {
       this.steeringWheel.shipRotation = this.rotation;
     }
+    
+    // Periodically clean up orphaned meshes (every 5 seconds)
+    if (!this._lastCleanupTime) {
+      this._lastCleanupTime = 0;
+    }
+    
+    this._lastCleanupTime += deltaTime;
+    if (this._lastCleanupTime > 5) {
+      this.cleanupOrphanedMeshes();
+      this._lastCleanupTime = 0;
+    }
   }
 
   /**
@@ -511,6 +557,70 @@ class Ship {
         rotation: block.rotation || 0
       }))
     };
+  }
+
+  /**
+   * Clean up orphaned meshes and ensure block-mesh consistency
+   * This should be called periodically to prevent ghost blocks
+   */
+  cleanupOrphanedMeshes() {
+    console.log("Cleaning up orphaned meshes...");
+    
+    // Step 1: Find all meshes in the group
+    const meshes = [];
+    this.group.traverse(child => {
+      if (child.isMesh && child.userData.isBlock) {
+        meshes.push(child);
+      }
+    });
+    
+    console.log(`Found ${meshes.length} meshes in ship group`);
+    
+    // Step 2: Check each mesh to see if it has a corresponding block
+    let orphanedMeshCount = 0;
+    for (const mesh of meshes) {
+      // Get the position from the mesh
+      const meshPos = {
+        x: Math.round(mesh.position.x),
+        y: Math.round(mesh.position.y),
+        z: Math.round(mesh.position.z)
+      };
+      
+      // Check if there's a block at this position
+      const blockExists = this.blocks.some(block => 
+        block.position.x === meshPos.x &&
+        block.position.y === meshPos.y &&
+        block.position.z === meshPos.z
+      );
+      
+      // If no block exists at this position, remove the mesh
+      if (!blockExists) {
+        console.log(`Removing orphaned mesh at position: ${meshPos.x}, ${meshPos.y}, ${meshPos.z}`);
+        if (mesh.parent) {
+          mesh.parent.remove(mesh);
+        }
+        orphanedMeshCount++;
+      }
+    }
+    
+    // Step 3: Check for blocks without meshes
+    let blocksWithoutMeshCount = 0;
+    for (const block of this.blocks) {
+      if (!block.mesh || !block.mesh.parent) {
+        console.log(`Found block without mesh at position: ${block.position.x}, ${block.position.y}, ${block.position.z}`);
+        blocksWithoutMeshCount++;
+        
+        // Recreate the mesh for this block if we have a resource loader
+        if (window.resourceLoader) {
+          block.createMesh(this.group, window.resourceLoader);
+          console.log("Recreated mesh for block");
+        }
+      }
+    }
+    
+    console.log(`Cleanup complete. Removed ${orphanedMeshCount} orphaned meshes and found ${blocksWithoutMeshCount} blocks without meshes.`);
+    
+    return { orphanedMeshCount, blocksWithoutMeshCount };
   }
 }
 

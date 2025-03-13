@@ -689,7 +689,7 @@ class Player {
     
     // Cast ray to find block to break
     const raycaster = new THREE.Raycaster(eyePosition, lookDirection);
-    raycaster.far = this.maxPlaceDistance; // Use the same distance as for placing blocks
+    raycaster.far = this.maxPlaceDistance;
     
     // Check for intersection with the ship
     if (this.ship && this.ship.blocks.length > 0) {
@@ -720,6 +720,9 @@ class Player {
           if (block) {
             console.log(`Breaking block of type: ${block.type} at position:`, block.position);
             
+            // Store block type before removal
+            const blockType = block.type;
+            
             // Try to remove the block from the ship
             const removed = this.ship.removeBlock(block);
             
@@ -727,7 +730,27 @@ class Player {
               console.log("Block successfully removed from ship");
               
               // Add to inventory
-              this.addToInventory({ type: block.type });
+              this.addToInventory({ type: blockType });
+              
+              // Verify the block was actually removed from the ship's blocks array
+              const blockStillExists = this.ship.blocks.some(b => 
+                b.position.x === block.position.x && 
+                b.position.y === block.position.y && 
+                b.position.z === block.position.z
+              );
+              
+              if (blockStillExists) {
+                console.error("Block still exists in ship blocks array after removal!");
+                // Force remove any blocks at this position
+                const duplicateIndex = this.ship.blocks.findIndex(b => 
+                  b.position.x === block.position.x && 
+                  b.position.y === block.position.y && 
+                  b.position.z === block.position.z
+                );
+                if (duplicateIndex !== -1) {
+                  this.ship.blocks.splice(duplicateIndex, 1);
+                }
+              }
               
               // Save ship to localStorage if shipStorage is available
               if (this.shipStorage && this.username) {
@@ -747,6 +770,55 @@ class Player {
             }
           } else {
             console.error("No block data found on mesh");
+            
+            // Try to find and remove the block by position
+            const worldPos = new THREE.Vector3();
+            mesh.getWorldPosition(worldPos);
+            
+            // Convert world position to ship-relative position
+            const shipPos = {
+              x: Math.round(worldPos.x - this.ship.position.x),
+              y: Math.round(worldPos.y - this.ship.position.y),
+              z: Math.round(worldPos.z - this.ship.position.z)
+            };
+            
+            console.log("Attempting to find block at ship position:", shipPos);
+            
+            // Find block at this position
+            const blockAtPosition = this.ship.blocks.find(b => 
+              b.position.x === shipPos.x && 
+              b.position.y === shipPos.y && 
+              b.position.z === shipPos.z
+            );
+            
+            if (blockAtPosition) {
+              console.log("Found block by position, attempting to remove");
+              const removed = this.ship.removeBlock(blockAtPosition);
+              
+              if (removed) {
+                console.log("Block successfully removed by position");
+                this.addToInventory({ type: blockAtPosition.type });
+                
+                // Save ship and inventory
+                if (this.shipStorage && this.username) {
+                  try {
+                    const shipDefinition = this.ship.serialize();
+                    this.shipStorage.saveShip(this.username, shipDefinition);
+                  } catch (error) {
+                    console.error("Error saving ship to localStorage:", error);
+                  }
+                }
+                this.saveInventory();
+              }
+            } else {
+              console.error("Could not find block at position:", shipPos);
+              
+              // As a last resort, remove the mesh from the scene
+              if (mesh.parent) {
+                mesh.parent.remove(mesh);
+                console.log("Removed orphaned mesh from scene");
+              }
+            }
           }
         } else {
           console.log(`Block too far to break (${intersection.distance} > ${this.maxPlaceDistance})`);
@@ -757,6 +829,9 @@ class Player {
     } else {
       console.log("No ship or blocks available to break");
     }
+    
+    // Clean up the ship to remove any ghost blocks
+    this.cleanupShip();
   }
 
   /**
@@ -835,9 +910,7 @@ class Player {
       // Get all block meshes from the ship
       const blockMeshes = [];
       this.ship.group.traverse(child => {
-        if (child.isMesh) {
-          // Mark all meshes as blocks for raycasting
-          child.userData.isBlock = true;
+        if (child.isMesh && child.userData.isBlock) {
           blockMeshes.push(child);
         }
       });
@@ -854,41 +927,284 @@ class Player {
         
         // Check if the intersection is within the maximum placement distance
         if (intersection.distance <= this.maxPlaceDistance) {
-          // Get the normal of the face that was hit
-          const faceNormal = intersection.face.normal.clone();
-          
-          // The normal is in object space, we need to transform it to world space
-          const normalMatrix = new THREE.Matrix3().getNormalMatrix(intersection.object.matrixWorld);
-          faceNormal.applyMatrix3(normalMatrix).normalize();
-          
-          // Get the position of the block that was hit
-          const hitBlockPosition = new THREE.Vector3();
-          hitBlockPosition.copy(intersection.point).sub(faceNormal.clone().multiplyScalar(0.5));
-          
-          // Round to get the grid position of the hit block
-          const hitBlockGridPos = {
-            x: Math.round(hitBlockPosition.x - this.ship.position.x),
-            y: Math.round(hitBlockPosition.y - this.ship.position.y),
-            z: Math.round(hitBlockPosition.z - this.ship.position.z)
-          };
-          
-          // Calculate the position for the new block by adding the face normal
-          placementPos = new THREE.Vector3(
-            hitBlockGridPos.x + Math.round(faceNormal.x),
-            hitBlockGridPos.y + Math.round(faceNormal.y),
-            hitBlockGridPos.z + Math.round(faceNormal.z)
-          );
-          
-          // Add the ship position to get world coordinates
-          placementPos.add(new THREE.Vector3(
-            this.ship.position.x,
-            this.ship.position.y,
-            this.ship.position.z
-          ));
-          
-          console.log("Hit block grid position:", hitBlockGridPos);
-          console.log("Face normal (world space):", faceNormal);
-          console.log("Placement position (world):", placementPos);
+          try {
+            // Get the block that was hit
+            const hitBlockData = intersection.object.userData.block;
+            
+            if (!hitBlockData) {
+              console.warn("No block data found in the hit object's userData");
+              return;
+            }
+            
+            console.log("Hit block data:", hitBlockData);
+            
+            // Get the face normal in local space
+            const faceNormal = intersection.face.normal.clone();
+            
+            // Transform the normal to world space
+            const normalMatrix = new THREE.Matrix3().getNormalMatrix(intersection.object.matrixWorld);
+            const worldNormal = faceNormal.clone().applyMatrix3(normalMatrix).normalize();
+            
+            console.log("Face normal (local):", faceNormal);
+            console.log("Face normal (world):", worldNormal);
+            
+            // Convert world normal to ship space by applying inverse ship rotation
+            const shipRotationY = this.ship.rotation;
+            const rotationMatrix = new THREE.Matrix4().makeRotationY(-shipRotationY);
+            const shipSpaceNormal = worldNormal.clone().applyMatrix4(rotationMatrix);
+            
+            console.log("Ship space normal:", shipSpaceNormal);
+            
+            // Round to get the direction in grid space
+            // We need to be careful with rounding to ensure we get a valid direction
+            let direction = {
+              x: 0,
+              y: 0,
+              z: 0
+            };
+            
+            // Find the dominant axis
+            const absX = Math.abs(shipSpaceNormal.x);
+            const absY = Math.abs(shipSpaceNormal.y);
+            const absZ = Math.abs(shipSpaceNormal.z);
+            
+            if (absX >= absY && absX >= absZ) {
+              direction.x = Math.sign(shipSpaceNormal.x);
+            } else if (absY >= absX && absY >= absZ) {
+              direction.y = Math.sign(shipSpaceNormal.y);
+            } else {
+              direction.z = Math.sign(shipSpaceNormal.z);
+            }
+            
+            console.log("Direction for new block:", direction);
+            
+            // Calculate the grid position for the new block
+            const newBlockGridPos = {
+              x: hitBlockData.position.x + direction.x,
+              y: hitBlockData.position.y + direction.y,
+              z: hitBlockData.position.z + direction.z
+            };
+            
+            console.log("Hit block grid position:", hitBlockData.position);
+            console.log("New block grid position:", newBlockGridPos);
+            
+            // Check if there's already a block at this position
+            const existingBlock = this.ship.blocks.find(block => 
+              block.position.x === newBlockGridPos.x &&
+              block.position.y === newBlockGridPos.y &&
+              block.position.z === newBlockGridPos.z
+            );
+            
+            if (existingBlock) {
+              console.log("Block already exists at this position");
+              return;
+            }
+            
+            // Also check for any orphaned meshes at this position
+            let orphanedMeshFound = false;
+            this.ship.group.traverse(child => {
+              if (child.isMesh && child.userData.isBlock) {
+                // Get the position in grid coordinates
+                const meshGridPos = {
+                  x: Math.round(child.position.x),
+                  y: Math.round(child.position.y),
+                  z: Math.round(child.position.z)
+                };
+                
+                if (meshGridPos.x === newBlockGridPos.x && 
+                    meshGridPos.y === newBlockGridPos.y && 
+                    meshGridPos.z === newBlockGridPos.z) {
+                  console.log("Found orphaned mesh at target position, removing it");
+                  if (child.parent) {
+                    child.parent.remove(child);
+                  }
+                  orphanedMeshFound = true;
+                }
+              }
+            });
+            
+            if (orphanedMeshFound) {
+              console.log("Cleaned up orphaned mesh before placing new block");
+            }
+            
+            // Remove from inventory
+            const removed = this.removeFromInventory(this.inventory.selectedSlot);
+            
+            if (removed) {
+              // Create new block with a more robust structure
+              const newBlock = {
+                type: this.selectedBlock.type,
+                position: { ...newBlockGridPos },
+                health: 100,
+                mesh: null,
+                
+                // Create mesh for the block
+                createMesh(group, textureLoader) {
+                  // Create geometry
+                  const geometry = new THREE.BoxGeometry(1, 1, 1);
+                  
+                  // Get texture for the block type
+                  let texture;
+                  try {
+                    if (textureLoader && typeof textureLoader.get === 'function') {
+                      texture = textureLoader.get(this.type);
+                    }
+                  } catch (error) {
+                    console.error(`Failed to load texture for block type: ${this.type}`, error);
+                  }
+                  
+                  // Create material
+                  let material;
+                  if (texture) {
+                    material = new THREE.MeshStandardMaterial({ map: texture });
+                  } else {
+                    // Use a default color based on block type
+                    let color;
+                    switch (this.type) {
+                      case 'wood': color = 0x8B4513; break;
+                      case 'stone': color = 0x808080; break;
+                      case 'lift': color = 0xFFD700; break;
+                      case 'cannon': color = 0x696969; break;
+                      case 'control': color = 0x8B0000; break;
+                      default: color = 0xAAAAAA; break;
+                    }
+                    material = new THREE.MeshStandardMaterial({ color });
+                  }
+                  
+                  // Create mesh
+                  this.mesh = new THREE.Mesh(geometry, material);
+                  
+                  // IMPORTANT: Set the mesh position exactly to the block's grid position
+                  // This ensures the visual representation matches the logical position
+                  this.mesh.position.set(this.position.x, this.position.y, this.position.z);
+                  
+                  this.mesh.castShadow = true;
+                  this.mesh.receiveShadow = true;
+                  
+                  // Store a reference to the block on the mesh for raycasting
+                  this.mesh.userData.block = this;
+                  this.mesh.userData.isBlock = true;
+                  this.mesh.userData.type = this.type;
+                  this.mesh.userData.gridPosition = { ...this.position };
+                  
+                  // Add to group
+                  if (group) {
+                    group.add(this.mesh);
+                    
+                    // Force update the world matrix to ensure correct positioning
+                    this.mesh.updateMatrixWorld(true);
+                    
+                    console.log(`Added mesh for ${this.type} block to group at position:`, this.position);
+                  } else {
+                    console.error("No group provided to add mesh to");
+                  }
+                  
+                  console.log(`Created mesh for ${this.type} block at position:`, this.position);
+                },
+                
+                // Add a method to get the world position of this block
+                getWorldPosition(ship) {
+                  if (!ship) return { ...this.position };
+                  
+                  return {
+                    x: ship.position.x + this.position.x,
+                    y: ship.position.y + this.position.y,
+                    z: ship.position.z + this.position.z
+                  };
+                },
+                
+                // Add a method to get the collision box for this block
+                getCollisionBox(ship) {
+                  const worldPos = this.getWorldPosition(ship);
+                  const box = new THREE.Box3();
+                  
+                  box.min.set(
+                    worldPos.x - 0.5,
+                    worldPos.y - 0.5,
+                    worldPos.z - 0.5
+                  );
+                  
+                  box.max.set(
+                    worldPos.x + 0.5,
+                    worldPos.y + 0.5,
+                    worldPos.z + 0.5
+                  );
+                  
+                  return box;
+                }
+              };
+              
+              // Get the resource loader
+              let resourceLoader = window.resourceLoader;
+              
+              // If window.resourceLoader is not available, use a simple fallback
+              if (!resourceLoader) {
+                console.warn("Resource loader not found on window object, using fallback");
+                
+                // Create a simple fallback texture loader
+                resourceLoader = {
+                  get: function(type) {
+                    // Create a canvas for the texture
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 64;
+                    canvas.height = 64;
+                    const ctx = canvas.getContext('2d');
+                    
+                    // Fill with a color based on block type
+                    switch (type) {
+                      case 'wood': ctx.fillStyle = '#8B4513'; break;
+                      case 'stone': ctx.fillStyle = '#808080'; break;
+                      case 'lift': ctx.fillStyle = '#FFD700'; break;
+                      case 'cannon': ctx.fillStyle = '#696969'; break;
+                      case 'control': ctx.fillStyle = '#8B0000'; break;
+                      default: ctx.fillStyle = '#AAAAAA'; break;
+                    }
+                    
+                    ctx.fillRect(0, 0, 64, 64);
+                    return new THREE.CanvasTexture(canvas);
+                  }
+                };
+              }
+              
+              // Add to ship with the resource loader
+              if (newBlock) {
+                // Create the mesh before adding to the ship
+                newBlock.createMesh(this.ship.group, resourceLoader);
+                
+                // Add to ship's blocks array
+                this.ship.blocks.push(newBlock);
+                
+                console.log("Block added to ship");
+                
+                // Save ship to localStorage if shipStorage is available
+                if (this.shipStorage && this.username) {
+                  try {
+                    const shipDefinition = this.ship.serialize();
+                    this.shipStorage.saveShip(this.username, shipDefinition);
+                    console.log("Ship saved to localStorage");
+                  } catch (error) {
+                    console.error("Error saving ship to localStorage:", error);
+                  }
+                }
+                
+                // Also save the inventory state
+                this.saveInventory();
+                
+                // Force update the ship's group to ensure the new block is visible
+                this.ship.group.updateMatrixWorld(true);
+              } else {
+                console.error("Failed to create new block");
+                
+                // Add the item back to inventory since placement failed
+                this.addToInventory({ type: this.selectedBlock.type });
+              }
+            } else {
+              console.error("Failed to remove block from inventory");
+            }
+          } catch (error) {
+            console.error("Error calculating block placement:", error);
+            return;
+          }
         } else {
           console.log(`Intersection too far (${intersection.distance} > ${this.maxPlaceDistance})`);
           return;
@@ -902,6 +1218,221 @@ class Player {
         );
         
         console.log("Placing block in air at position:", placementPos);
+        
+        // Round to grid position
+        placementPos.x = Math.round(placementPos.x);
+        placementPos.y = Math.round(placementPos.y);
+        placementPos.z = Math.round(placementPos.z);
+        
+        // Convert to grid position relative to ship
+        const gridPos = {
+          x: Math.round(placementPos.x - this.ship.position.x),
+          y: Math.round(placementPos.y - this.ship.position.y),
+          z: Math.round(placementPos.z - this.ship.position.z)
+        };
+        
+        console.log("Attempting to place block at grid position:", gridPos);
+        
+        // Check if position is within placement range
+        const distance = eyePosition.distanceTo(new THREE.Vector3(
+          gridPos.x + this.ship.position.x,
+          gridPos.y + this.ship.position.y,
+          gridPos.z + this.ship.position.z
+        ));
+        
+        console.log("Distance to placement position:", distance, "max:", this.maxPlaceDistance);
+        
+        if (distance <= this.maxPlaceDistance) {
+          // Check if there's already a block at this position
+          const existingBlock = this.ship.blocks.find(block => 
+            block.position.x === gridPos.x &&
+            block.position.y === gridPos.y &&
+            block.position.z === gridPos.z
+          );
+          
+          if (!existingBlock) {
+            console.log(`Placing ${this.selectedBlock.type} block at position:`, gridPos);
+            
+            // Remove from inventory
+            const removed = this.removeFromInventory(this.inventory.selectedSlot);
+            
+            if (removed) {
+              // Create new block with the same robust structure
+              const newBlock = {
+                type: this.selectedBlock.type,
+                position: { ...gridPos },
+                health: 100,
+                mesh: null,
+                
+                // Create mesh for the block
+                createMesh(group, textureLoader) {
+                  // Create geometry
+                  const geometry = new THREE.BoxGeometry(1, 1, 1);
+                  
+                  // Get texture for the block type
+                  let texture;
+                  try {
+                    if (textureLoader && typeof textureLoader.get === 'function') {
+                      texture = textureLoader.get(this.type);
+                    }
+                  } catch (error) {
+                    console.error(`Failed to load texture for block type: ${this.type}`, error);
+                  }
+                  
+                  // Create material
+                  let material;
+                  if (texture) {
+                    material = new THREE.MeshStandardMaterial({ map: texture });
+                  } else {
+                    // Use a default color based on block type
+                    let color;
+                    switch (this.type) {
+                      case 'wood': color = 0x8B4513; break;
+                      case 'stone': color = 0x808080; break;
+                      case 'lift': color = 0xFFD700; break;
+                      case 'cannon': color = 0x696969; break;
+                      case 'control': color = 0x8B0000; break;
+                      default: color = 0xAAAAAA; break;
+                    }
+                    material = new THREE.MeshStandardMaterial({ color });
+                  }
+                  
+                  // Create mesh
+                  this.mesh = new THREE.Mesh(geometry, material);
+                  
+                  // IMPORTANT: Set the mesh position exactly to the block's grid position
+                  // This ensures the visual representation matches the logical position
+                  this.mesh.position.set(this.position.x, this.position.y, this.position.z);
+                  
+                  this.mesh.castShadow = true;
+                  this.mesh.receiveShadow = true;
+                  
+                  // Store a reference to the block on the mesh for raycasting
+                  this.mesh.userData.block = this;
+                  this.mesh.userData.isBlock = true;
+                  this.mesh.userData.type = this.type;
+                  this.mesh.userData.gridPosition = { ...this.position };
+                  
+                  // Add to group
+                  if (group) {
+                    group.add(this.mesh);
+                    
+                    // Force update the world matrix to ensure correct positioning
+                    this.mesh.updateMatrixWorld(true);
+                    
+                    console.log(`Added mesh for ${this.type} block to group at position:`, this.position);
+                  } else {
+                    console.error("No group provided to add mesh to");
+                  }
+                  
+                  console.log(`Created mesh for ${this.type} block at position:`, this.position);
+                },
+                
+                // Add a method to get the world position of this block
+                getWorldPosition(ship) {
+                  if (!ship) return { ...this.position };
+                  
+                  return {
+                    x: ship.position.x + this.position.x,
+                    y: ship.position.y + this.position.y,
+                    z: ship.position.z + this.position.z
+                  };
+                },
+                
+                // Add a method to get the collision box for this block
+                getCollisionBox(ship) {
+                  const worldPos = this.getWorldPosition(ship);
+                  const box = new THREE.Box3();
+                  
+                  box.min.set(
+                    worldPos.x - 0.5,
+                    worldPos.y - 0.5,
+                    worldPos.z - 0.5
+                  );
+                  
+                  box.max.set(
+                    worldPos.x + 0.5,
+                    worldPos.y + 0.5,
+                    worldPos.z + 0.5
+                  );
+                  
+                  return box;
+                }
+              };
+              
+              // Get the resource loader
+              let resourceLoader = window.resourceLoader;
+              
+              // If window.resourceLoader is not available, use a simple fallback
+              if (!resourceLoader) {
+                console.warn("Resource loader not found on window object, using fallback");
+                
+                // Create a simple fallback texture loader
+                resourceLoader = {
+                  get: function(type) {
+                    // Create a canvas for the texture
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 64;
+                    canvas.height = 64;
+                    const ctx = canvas.getContext('2d');
+                    
+                    // Fill with a color based on block type
+                    switch (type) {
+                      case 'wood': ctx.fillStyle = '#8B4513'; break;
+                      case 'stone': ctx.fillStyle = '#808080'; break;
+                      case 'lift': ctx.fillStyle = '#FFD700'; break;
+                      case 'cannon': ctx.fillStyle = '#696969'; break;
+                      case 'control': ctx.fillStyle = '#8B0000'; break;
+                      default: ctx.fillStyle = '#AAAAAA'; break;
+                    }
+                    
+                    ctx.fillRect(0, 0, 64, 64);
+                    return new THREE.CanvasTexture(canvas);
+                  }
+                };
+              }
+              
+              // Add to ship with the resource loader
+              if (newBlock) {
+                // Create the mesh before adding to the ship
+                newBlock.createMesh(this.ship.group, resourceLoader);
+                
+                // Add to ship's blocks array
+                this.ship.blocks.push(newBlock);
+                
+                console.log("Block added to ship");
+                
+                // Save ship to localStorage if shipStorage is available
+                if (this.shipStorage && this.username) {
+                  try {
+                    const shipDefinition = this.ship.serialize();
+                    this.shipStorage.saveShip(this.username, shipDefinition);
+                    console.log("Ship saved to localStorage");
+                  } catch (error) {
+                    console.error("Error saving ship to localStorage:", error);
+                  }
+                }
+                
+                // Also save the inventory state
+                this.saveInventory();
+                
+                // Force update the ship's group to ensure the new block is visible
+                this.ship.group.updateMatrixWorld(true);
+              } else {
+                console.error("Failed to create new block");
+                
+                // Add the item back to inventory since placement failed
+                this.addToInventory({ type: this.selectedBlock.type });
+              }
+            } else {
+              console.error("Failed to remove block from inventory");
+            }
+          } else {
+            console.error("Block already exists at this position");
+          }
+        } else {
+          console.log(`Block placement too far (${distance} > ${this.maxPlaceDistance})`);
+        }
       }
     } else if (this.ship) {
       // No blocks in ship yet, place the first block at a distance in front of the player
@@ -910,13 +1441,7 @@ class Player {
       );
       
       console.log("Placing first block at position:", placementPos);
-    } else {
-      // No ship available
-      console.log("No ship available to place blocks on");
-      return;
-    }
-    
-    if (placementPos) {
+      
       // Round to grid position
       placementPos.x = Math.round(placementPos.x);
       placementPos.y = Math.round(placementPos.y);
@@ -929,163 +1454,190 @@ class Player {
         z: Math.round(placementPos.z - this.ship.position.z)
       };
       
-      console.log("Attempting to place block at grid position:", gridPos);
+      console.log("Attempting to place first block at grid position:", gridPos);
       
-      // Check if position is within placement range
-      const distance = eyePosition.distanceTo(new THREE.Vector3(
-        gridPos.x + this.ship.position.x,
-        gridPos.y + this.ship.position.y,
-        gridPos.z + this.ship.position.z
-      ));
+      // Remove from inventory
+      const removed = this.removeFromInventory(this.inventory.selectedSlot);
       
-      console.log("Distance to placement position:", distance, "max:", this.maxPlaceDistance);
-      
-      if (distance <= this.maxPlaceDistance) {
-        // Check if there's already a block at this position
-        const existingBlock = this.ship.blocks.find(block => 
-          block.position.x === gridPos.x &&
-          block.position.y === gridPos.y &&
-          block.position.z === gridPos.z
-        );
-        
-        if (!existingBlock) {
-          console.log(`Placing ${this.selectedBlock.type} block at position:`, gridPos);
+      if (removed) {
+        // Create new block with the same robust structure
+        const newBlock = {
+          type: this.selectedBlock.type,
+          position: { ...gridPos },
+          health: 100,
+          mesh: null,
           
-          // Remove from inventory
-          const removed = this.removeFromInventory(this.inventory.selectedSlot);
-          
-          if (removed) {
-            // Create new block
-            const newBlock = {
-              type: this.selectedBlock.type,
-              position: { ...gridPos },
-              health: 100,
-              mesh: null,
-              
-              // Create mesh for the block
-              createMesh(group, textureLoader) {
-                // Create geometry
-                const geometry = new THREE.BoxGeometry(1, 1, 1);
-                
-                // Get texture for the block type
-                let texture;
-                try {
-                  if (textureLoader && typeof textureLoader.get === 'function') {
-                    texture = textureLoader.get(this.type);
-                  }
-                } catch (error) {
-                  console.error(`Failed to load texture for block type: ${this.type}`, error);
-                }
-                
-                // Create material
-                let material;
-                if (texture) {
-                  material = new THREE.MeshStandardMaterial({ map: texture });
-                } else {
-                  // Use a default color based on block type
-                  let color;
-                  switch (this.type) {
-                    case 'wood': color = 0x8B4513; break;
-                    case 'stone': color = 0x808080; break;
-                    case 'lift': color = 0xFFD700; break;
-                    case 'cannon': color = 0x696969; break;
-                    case 'control': color = 0x8B0000; break;
-                    default: color = 0xAAAAAA; break;
-                  }
-                  material = new THREE.MeshStandardMaterial({ color });
-                }
-                
-                // Create mesh
-                this.mesh = new THREE.Mesh(geometry, material);
-                this.mesh.position.set(this.position.x, this.position.y, this.position.z);
-                this.mesh.castShadow = true;
-                this.mesh.receiveShadow = true;
-                
-                // Store a reference to the block on the mesh
-                this.mesh.userData.block = this;
-                this.mesh.userData.isBlock = true;
-                
-                // Add to group
-                group.add(this.mesh);
-                
-                console.log(`Created mesh for ${this.type} block at position:`, this.position);
+          // Create mesh for the block (same as above)
+          createMesh(group, textureLoader) {
+            // Create geometry
+            const geometry = new THREE.BoxGeometry(1, 1, 1);
+            
+            // Get texture for the block type
+            let texture;
+            try {
+              if (textureLoader && typeof textureLoader.get === 'function') {
+                texture = textureLoader.get(this.type);
               }
-            };
-            
-            // Get the resource loader
-            let resourceLoader = window.resourceLoader;
-            
-            // If window.resourceLoader is not available, use a simple fallback
-            if (!resourceLoader) {
-              console.warn("Resource loader not found on window object, using fallback");
-              
-              // Create a simple fallback texture loader
-              resourceLoader = {
-                get: function(type) {
-                  // Create a canvas for the texture
-                  const canvas = document.createElement('canvas');
-                  canvas.width = 64;
-                  canvas.height = 64;
-                  const ctx = canvas.getContext('2d');
-                  
-                  // Fill with a color based on block type
-                  switch (type) {
-                    case 'wood': ctx.fillStyle = '#8B4513'; break;
-                    case 'stone': ctx.fillStyle = '#808080'; break;
-                    case 'lift': ctx.fillStyle = '#FFD700'; break;
-                    case 'cannon': ctx.fillStyle = '#696969'; break;
-                    case 'control': ctx.fillStyle = '#8B0000'; break;
-                    default: ctx.fillStyle = '#AAAAAA'; break;
-                  }
-                  
-                  ctx.fillRect(0, 0, 64, 64);
-                  return new THREE.CanvasTexture(canvas);
-                }
-              };
+            } catch (error) {
+              console.error(`Failed to load texture for block type: ${this.type}`, error);
             }
             
-            // Add to ship with the resource loader
-            if (newBlock) {
-              // Create the mesh before adding to the ship
-              newBlock.createMesh(this.ship.group, resourceLoader);
-              
-              // Add to ship's blocks array
-              this.ship.blocks.push(newBlock);
-              
-              console.log("Block added to ship");
-              
-              // Save ship to localStorage if shipStorage is available
-              if (this.shipStorage && this.username) {
-                try {
-                  const shipDefinition = this.ship.serialize();
-                  this.shipStorage.saveShip(this.username, shipDefinition);
-                  console.log("Ship saved to localStorage");
-                } catch (error) {
-                  console.error("Error saving ship to localStorage:", error);
-                }
-              }
-              
-              // Also save the inventory state
-              this.saveInventory();
-              
-              // Force update the ship's group to ensure the new block is visible
-              this.ship.group.updateMatrixWorld(true);
+            // Create material
+            let material;
+            if (texture) {
+              material = new THREE.MeshStandardMaterial({ map: texture });
             } else {
-              console.error("Failed to create new block");
-              
-              // Add the item back to inventory since placement failed
-              this.addToInventory({ type: this.selectedBlock.type });
+              // Use a default color based on block type
+              let color;
+              switch (this.type) {
+                case 'wood': color = 0x8B4513; break;
+                case 'stone': color = 0x808080; break;
+                case 'lift': color = 0xFFD700; break;
+                case 'cannon': color = 0x696969; break;
+                case 'control': color = 0x8B0000; break;
+                default: color = 0xAAAAAA; break;
+              }
+              material = new THREE.MeshStandardMaterial({ color });
             }
-          } else {
-            console.error("Failed to remove block from inventory");
+            
+            // Create mesh
+            this.mesh = new THREE.Mesh(geometry, material);
+            
+            // IMPORTANT: Set the mesh position exactly to the block's grid position
+            // This ensures the visual representation matches the logical position
+            this.mesh.position.set(this.position.x, this.position.y, this.position.z);
+            
+            this.mesh.castShadow = true;
+            this.mesh.receiveShadow = true;
+            
+            // Store a reference to the block on the mesh for raycasting
+            this.mesh.userData.block = this;
+            this.mesh.userData.isBlock = true;
+            this.mesh.userData.type = this.type;
+            this.mesh.userData.gridPosition = { ...this.position };
+            
+            // Add to group
+            if (group) {
+              group.add(this.mesh);
+              
+              // Force update the world matrix to ensure correct positioning
+              this.mesh.updateMatrixWorld(true);
+              
+              console.log(`Added mesh for ${this.type} block to group at position:`, this.position);
+            } else {
+              console.error("No group provided to add mesh to");
+            }
+            
+            console.log(`Created mesh for ${this.type} block at position:`, this.position);
+          },
+          
+          // Add a method to get the world position of this block
+          getWorldPosition(ship) {
+            if (!ship) return { ...this.position };
+            
+            return {
+              x: ship.position.x + this.position.x,
+              y: ship.position.y + this.position.y,
+              z: ship.position.z + this.position.z
+            };
+          },
+          
+          // Add a method to get the collision box for this block
+          getCollisionBox(ship) {
+            const worldPos = this.getWorldPosition(ship);
+            const box = new THREE.Box3();
+            
+            box.min.set(
+              worldPos.x - 0.5,
+              worldPos.y - 0.5,
+              worldPos.z - 0.5
+            );
+            
+            box.max.set(
+              worldPos.x + 0.5,
+              worldPos.y + 0.5,
+              worldPos.z + 0.5
+            );
+            
+            return box;
           }
+        };
+        
+        // Get the resource loader
+        let resourceLoader = window.resourceLoader;
+        
+        // If window.resourceLoader is not available, use a simple fallback
+        if (!resourceLoader) {
+          console.warn("Resource loader not found on window object, using fallback");
+          
+          // Create a simple fallback texture loader
+          resourceLoader = {
+            get: function(type) {
+              // Create a canvas for the texture
+              const canvas = document.createElement('canvas');
+              canvas.width = 64;
+              canvas.height = 64;
+              const ctx = canvas.getContext('2d');
+              
+              // Fill with a color based on block type
+              switch (type) {
+                case 'wood': ctx.fillStyle = '#8B4513'; break;
+                case 'stone': ctx.fillStyle = '#808080'; break;
+                case 'lift': ctx.fillStyle = '#FFD700'; break;
+                case 'cannon': ctx.fillStyle = '#696969'; break;
+                case 'control': ctx.fillStyle = '#8B0000'; break;
+                default: ctx.fillStyle = '#AAAAAA'; break;
+              }
+              
+              ctx.fillRect(0, 0, 64, 64);
+              return new THREE.CanvasTexture(canvas);
+            }
+          };
+        }
+        
+        // Add to ship with the resource loader
+        if (newBlock) {
+          // Create the mesh before adding to the ship
+          newBlock.createMesh(this.ship.group, resourceLoader);
+          
+          // Add to ship's blocks array
+          this.ship.blocks.push(newBlock);
+          
+          console.log("First block added to ship");
+          
+          // Save ship to localStorage if shipStorage is available
+          if (this.shipStorage && this.username) {
+            try {
+              const shipDefinition = this.ship.serialize();
+              this.shipStorage.saveShip(this.username, shipDefinition);
+              console.log("Ship saved to localStorage");
+            } catch (error) {
+              console.error("Error saving ship to localStorage:", error);
+            }
+          }
+          
+          // Also save the inventory state
+          this.saveInventory();
+          
+          // Force update the ship's group to ensure the new block is visible
+          this.ship.group.updateMatrixWorld(true);
         } else {
-          console.log("Block already exists at this position");
+          console.error("Failed to create new block");
+          
+          // Add the item back to inventory since placement failed
+          this.addToInventory({ type: this.selectedBlock.type });
         }
       } else {
-        console.log(`Block placement too far (${distance} > ${this.maxPlaceDistance})`);
+        console.error("Failed to remove block from inventory");
       }
+    } else {
+      // No ship available
+      console.log("No ship available to place blocks on");
+      return;
     }
+    
+    // Clean up the ship to remove any ghost blocks
+    this.cleanupShip();
   }
 
   /**
@@ -1397,13 +1949,194 @@ class Player {
     // Apply sneaking
     this.character.isSneaking = this.controls.sneak;
     
+    // Store current position before movement
+    const previousPosition = {
+      x: this.character.position.x,
+      y: this.character.position.y,
+      z: this.character.position.z
+    };
+    
     // Update position
-    this.character.position.x += this.character.velocity.x;
-    this.character.position.y += this.character.velocity.y * deltaTime;
-    this.character.position.z += this.character.velocity.z;
+    const newPosition = {
+      x: previousPosition.x + this.character.velocity.x,
+      y: previousPosition.y + this.character.velocity.y * deltaTime,
+      z: previousPosition.z + this.character.velocity.z
+    };
     
     // Collision detection with ship blocks
-    // (Simplified - in a full implementation, this would be more complex)
+    if (this.ship && this.ship.blocks.length > 0) {
+      // Create a simple collision box for the character
+      const characterBox = new THREE.Box3();
+      const characterSize = { 
+        width: this.character.width, 
+        height: this.character.height, 
+        depth: this.character.width 
+      };
+      
+      // Set up character box at the new position
+      characterBox.min.set(
+        newPosition.x - characterSize.width / 2,
+        newPosition.y,
+        newPosition.z - characterSize.width / 2
+      );
+      
+      characterBox.max.set(
+        newPosition.x + characterSize.width / 2,
+        newPosition.y + characterSize.height,
+        newPosition.z + characterSize.width / 2
+      );
+      
+      // Check for collisions with blocks
+      let collisionDetected = false;
+      
+      for (const block of this.ship.blocks) {
+        // Skip blocks without meshes
+        if (!block.mesh) continue;
+        
+        // Use the block's getCollisionBox method if available, otherwise calculate it directly
+        let blockBox;
+        if (typeof block.getCollisionBox === 'function') {
+          blockBox = block.getCollisionBox(this.ship);
+        } else {
+          // Get block position in world space using the ship's getBlockWorldPosition method
+          const blockWorldPos = this.ship.getBlockWorldPosition(block);
+          
+          // Create a box for the block
+          blockBox = new THREE.Box3();
+          blockBox.min.set(
+            blockWorldPos.x - 0.5,
+            blockWorldPos.y - 0.5,
+            blockWorldPos.z - 0.5
+          );
+          
+          blockBox.max.set(
+            blockWorldPos.x + 0.5,
+            blockWorldPos.y + 0.5,
+            blockWorldPos.z + 0.5
+          );
+        }
+        
+        // Check for intersection
+        if (characterBox.intersectsBox(blockBox)) {
+          collisionDetected = true;
+          console.log(`Collision with block at ${JSON.stringify(block.position)}`);
+          break;
+        }
+      }
+      
+      // If collision detected, try to slide along walls
+      if (collisionDetected) {
+        console.log("Collision detected with ship block");
+        
+        // Try X movement only
+        const xOnlyPosition = {
+          x: previousPosition.x + this.character.velocity.x,
+          y: newPosition.y,
+          z: previousPosition.z
+        };
+        
+        // Check X-only movement
+        characterBox.min.set(
+          xOnlyPosition.x - characterSize.width / 2,
+          xOnlyPosition.y,
+          xOnlyPosition.z - characterSize.width / 2
+        );
+        
+        characterBox.max.set(
+          xOnlyPosition.x + characterSize.width / 2,
+          xOnlyPosition.y + characterSize.height,
+          xOnlyPosition.z + characterSize.width / 2
+        );
+        
+        // Check if X-only movement is valid
+        let xCollision = false;
+        for (const block of this.ship.blocks) {
+          if (!block.mesh) continue;
+          
+          // Get block collision box
+          let blockBox;
+          if (typeof block.getCollisionBox === 'function') {
+            blockBox = block.getCollisionBox(this.ship);
+          } else {
+            const blockWorldPos = this.ship.getBlockWorldPosition(block);
+            blockBox = new THREE.Box3();
+            blockBox.min.set(blockWorldPos.x - 0.5, blockWorldPos.y - 0.5, blockWorldPos.z - 0.5);
+            blockBox.max.set(blockWorldPos.x + 0.5, blockWorldPos.y + 0.5, blockWorldPos.z + 0.5);
+          }
+          
+          if (characterBox.intersectsBox(blockBox)) {
+            xCollision = true;
+            break;
+          }
+        }
+        
+        // Try Z movement only
+        const zOnlyPosition = {
+          x: previousPosition.x,
+          y: newPosition.y,
+          z: previousPosition.z + this.character.velocity.z
+        };
+        
+        // Check Z-only movement
+        characterBox.min.set(
+          zOnlyPosition.x - characterSize.width / 2,
+          zOnlyPosition.y,
+          zOnlyPosition.z - characterSize.width / 2
+        );
+        
+        characterBox.max.set(
+          zOnlyPosition.x + characterSize.width / 2,
+          zOnlyPosition.y + characterSize.height,
+          zOnlyPosition.z + characterSize.width / 2
+        );
+        
+        // Check if Z-only movement is valid
+        let zCollision = false;
+        for (const block of this.ship.blocks) {
+          if (!block.mesh) continue;
+          
+          // Get block collision box
+          let blockBox;
+          if (typeof block.getCollisionBox === 'function') {
+            blockBox = block.getCollisionBox(this.ship);
+          } else {
+            const blockWorldPos = this.ship.getBlockWorldPosition(block);
+            blockBox = new THREE.Box3();
+            blockBox.min.set(blockWorldPos.x - 0.5, blockWorldPos.y - 0.5, blockWorldPos.z - 0.5);
+            blockBox.max.set(blockWorldPos.x + 0.5, blockWorldPos.y + 0.5, blockWorldPos.z + 0.5);
+          }
+          
+          if (characterBox.intersectsBox(blockBox)) {
+            zCollision = true;
+            break;
+          }
+        }
+        
+        // Apply the valid movement
+        if (!xCollision) {
+          newPosition.x = xOnlyPosition.x;
+          newPosition.z = previousPosition.z;
+        } else if (!zCollision) {
+          newPosition.x = previousPosition.x;
+          newPosition.z = zOnlyPosition.z;
+        } else {
+          // Both directions have collisions, don't move horizontally
+          newPosition.x = previousPosition.x;
+          newPosition.z = previousPosition.z;
+        }
+      }
+    }
+    
+    // Update character position with collision-checked position
+    this.character.position = newPosition;
+    
+    // Check if character is on ground
+    const groundY = 0;
+    if (this.character.position.y <= groundY) {
+      this.character.position.y = groundY;
+      this.character.velocity.y = 0;
+      this.character.isJumping = false;
+    }
     
     // Keep character on the ship
     if (this.ship) {
@@ -1606,6 +2339,20 @@ class Player {
     }
     
     return false;
+  }
+
+  /**
+   * Clean up the ship to remove any ghost blocks
+   * This can be called after block operations or when issues are detected
+   */
+  cleanupShip() {
+    if (this.ship) {
+      console.log("Manually cleaning up ship...");
+      const result = this.ship.cleanupOrphanedMeshes();
+      console.log(`Cleanup result: ${JSON.stringify(result)}`);
+      return result;
+    }
+    return null;
   }
 }
 
