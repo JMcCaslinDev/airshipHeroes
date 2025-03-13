@@ -181,19 +181,28 @@ export function createUIManager(gameState, loginCallback) {
    * @param {Event} event - The form submit event
    */
   function handleLoginSubmit(event) {
+    // Prevent default form submission behavior
     event.preventDefault();
+    
+    // Stop propagation to prevent any key events from being triggered
+    event.stopPropagation();
+    
     console.log('Login form submitted');
     
     const username = usernameInput.value.trim();
     if (username) {
       console.log('Username entered:', `"${username}"`);
       hideLoginScreen();
-      if (typeof loginCallback === 'function') {
-        console.log('Calling login callback with username:', username);
-        loginCallback(username);
-      } else {
-        console.warn('Login callback is not a function');
-      }
+      
+      // Use setTimeout to ensure any pending key events are processed before calling the login callback
+      setTimeout(() => {
+        if (typeof loginCallback === 'function') {
+          console.log('Calling login callback with username:', username);
+          loginCallback(username);
+        } else {
+          console.warn('Login callback is not a function');
+        }
+      }, 0);
     } else {
       console.log('No username entered');
       // Show error message
@@ -201,15 +210,13 @@ export function createUIManager(gameState, loginCallback) {
       errorMessage.textContent = 'Please enter a username';
       errorMessage.style.color = 'red';
       errorMessage.style.marginTop = '10px';
+      errorMessage.className = 'error-message';
       
       // Remove any existing error messages
       const existingError = loginForm.querySelector('.error-message');
       if (existingError) {
         loginForm.removeChild(existingError);
       }
-      
-      // Add class for easy removal later
-      errorMessage.classList.add('error-message');
       
       // Add to form
       loginForm.appendChild(errorMessage);

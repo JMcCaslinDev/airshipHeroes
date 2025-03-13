@@ -84,7 +84,7 @@ export function createInputHandler(options = {}) {
     // Add direct event listener for number keys (1-9) for inventory selection
     window.addEventListener('keydown', (event) => {
       // Only handle number keys 1-9
-      if (event.code.startsWith('Digit') && event.code !== 'Digit0') {
+      if (event.code && event.code.startsWith('Digit') && event.code !== 'Digit0') {
         // Check if we're in player mode before dispatching the event
         const gameState = window.gameState; // Access the global game state
         if (gameState && gameState.localPlayer && gameState.localPlayer.mode === 'player') {
@@ -108,6 +108,8 @@ export function createInputHandler(options = {}) {
    * @param {KeyboardEvent} event - The key event
    */
   function handleKeyDown(event) {
+    if (!event.code) return;
+    
     updateKeyState(event.code, true);
     
     // Prevent default for game controls
@@ -121,6 +123,8 @@ export function createInputHandler(options = {}) {
    * @param {KeyboardEvent} event - The key event
    */
   function handleKeyUp(event) {
+    if (!event.code) return;
+    
     updateKeyState(event.code, false);
   }
   
@@ -130,6 +134,8 @@ export function createInputHandler(options = {}) {
    * @param {boolean} isDown - Whether the key is down
    */
   function updateKeyState(code, isDown) {
+    if (!code) return;
+    
     switch (code) {
       // Movement keys
       case 'KeyW':
@@ -221,6 +227,8 @@ export function createInputHandler(options = {}) {
    * @returns {boolean} Whether the key is a game control
    */
   function isGameControl(code) {
+    if (!code) return false;
+    
     return [
       'KeyW', 'KeyS', 'KeyA', 'KeyD',
       'Space', 'KeyX', 'KeyQ', 'KeyE', 'KeyF',
