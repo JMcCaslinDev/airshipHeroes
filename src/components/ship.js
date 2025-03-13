@@ -35,81 +35,87 @@ class Ship {
   }
 
   /**
-   * Load a ship from a definition file
-   * @param {Object} shipDefinition - The ship definition object
-   * @param {THREE.Scene} scene - The Three.js scene
-   * @param {Object} resourceLoader - Resource loader for textures
+   * Load ship from a definition object
+   * @param {Object} definition - The ship definition
+   * @param {Object} options - Additional options
+   * @returns {boolean} - Whether the load was successful
    */
-  loadFromDefinition(shipDefinition, scene, resourceLoader) {
-    try {
-      // Clear existing blocks
-      this.blocks = [];
+  loadFromDefinition(definition, options = {}) {
+    console.log("Loading ship from definition:", definition);
+    
+    if (!definition || !definition.blocks || !Array.isArray(definition.blocks)) {
+      console.error("Invalid ship definition");
+      return false;
+    }
+    
+    // Clear existing blocks
+    this.clearBlocks();
+    
+    // Set ship properties
+    if (definition.name) this.name = definition.name;
+    if (definition.owner) this.owner = definition.owner;
+    
+    // Set position if provided
+    if (definition.position) {
+      this.position.x = definition.position.x || 0;
+      this.position.y = definition.position.y || 0;
+      this.position.z = definition.position.z || 0;
       
-      // Remove existing meshes from the group
-      while (this.group.children.length > 0) {
-        this.group.remove(this.group.children[0]);
-      }
-      
-      // Create blocks from the definition
-      this.blocks = BlockFactory.createBlocksFromShipDefinition(shipDefinition);
-      
-      console.log(`Creating ${this.blocks.length} blocks for ship "${shipDefinition.name}"`);
-      
-      // Create meshes for each block and add to the group
-      for (const block of this.blocks) {
-        block.createMesh(this.group, resourceLoader);
-        
-        // Store reference to steering wheel
-        if (block.type === 'control') {
-          this.steeringWheel = block;
-        }
-      }
-      
-      // Ensure the group is visible
-      this.group.visible = true;
-      
-      // Add the group to the scene
-      scene.add(this.group);
-      
-      console.log(`Ship group added to scene with ${this.group.children.length} children`);
-      console.log(`Ship position: ${JSON.stringify(this.position)}`);
-      console.log(`Ship group position: ${JSON.stringify({
-        x: this.group.position.x,
-        y: this.group.position.y,
-        z: this.group.position.z
-      })}`);
-      
-      // Set the ship name if provided
-      if (shipDefinition.name) {
-        this.name = shipDefinition.name;
-      }
-      
-      // Check if the ship has enough lift
-      this.checkLift();
-      
-      console.log(`Ship "${this.name}" loaded successfully with ${this.blocks.length} blocks`);
-    } catch (error) {
-      console.error(`Error loading ship from definition:`, error);
-      
-      // Create a simple default block as fallback
-      const defaultBlock = BlockFactory.createBlock('control', { x: 0, y: 0, z: 0 });
-      this.blocks = [defaultBlock];
-      
-      // Create mesh for the default block
+      // Update the group position
+      this.group.position.set(this.position.x, this.position.y, this.position.z);
+    }
+    
+    // Set rotation if provided
+    if (definition.rotation !== undefined) {
+      this.rotation = definition.rotation;
+      this.group.rotation.y = this.rotation;
+    }
+    
+    // Create blocks
+    const blockFactory = new BlockFactory();
+    
+    for (const blockDef of definition.blocks) {
       try {
-        defaultBlock.createMesh(this.group, resourceLoader);
+        const block = blockFactory.createBlock(
+          blockDef.type,
+          blockDef.position,
+          {
+            rotation: blockDef.rotation || 0,
+            health: blockDef.health
+          }
+        );
         
-        // Ensure the group is visible
-        this.group.visible = true;
-        
-        // Add the group to the scene
-        scene.add(this.group);
-        
-        console.log('Default block created and added to scene');
-      } catch (meshError) {
-        console.error('Error creating default block mesh:', meshError);
+        if (block) {
+          this.blocks.push(block);
+          
+          // Create mesh for the block
+          if (window.resourceLoader) {
+            block.createMesh(this.group, window.resourceLoader);
+          } else {
+            console.warn(`No resource loader available for block ${block.type}`);
+          }
+        } else {
+          console.warn(`Failed to create block of type ${blockDef.type}`);
+        }
+      } catch (error) {
+        console.error(`Error creating block: ${error.message}`);
       }
     }
+    
+    console.log(`Loaded ${this.blocks.length} blocks`);
+    
+    // Update block meshes to ensure they're positioned correctly
+    this.updateBlockMeshes();
+    
+    // Fix any texture issues that might have occurred during loading
+    this.fixBlockTextureIssues();
+    
+    // Save to local storage if needed
+    if (options.saveToLocalStorage && this.owner) {
+      this.saveToLocalStorage();
+    }
+    
+    return true;
   }
 
   /**
@@ -134,46 +140,39 @@ class Ship {
 
   /**
    * Remove a block from the ship
-   * @param {Object} block - The block to remove
-   * @returns {Boolean} - Whether the block was successfully removed
+   * @param {Object} position - The position of the block to remove
+   * @returns {boolean} - Whether the block was removed
    */
-  removeBlock(block) {
-    const index = this.blocks.indexOf(block);
+  removeBlock(position) {
+    console.log(`Attempting to remove block at position: ${JSON.stringify(position)}`);
     
-    if (index === -1) {
-      console.warn('Block not found in ship blocks array');
-      
-      // Try to find the block by position
-      const blockByPosition = this.blocks.find(b => 
-        b.position.x === block.position.x && 
-        b.position.y === block.position.y && 
-        b.position.z === block.position.z
-      );
-      
-      if (blockByPosition) {
-        console.log('Found block by position instead');
-        return this.removeBlock(blockByPosition);
-      }
-      
+    // Find the block at the given position
+    const blockIndex = this.blocks.findIndex(block => 
+      block.position.x === position.x &&
+      block.position.y === position.y &&
+      block.position.z === position.z
+    );
+    
+    if (blockIndex === -1) {
+      console.warn(`No block found at position ${JSON.stringify(position)}`);
       return false;
     }
     
-    // Don't allow removing the steering wheel or control block
-    if (block.type === 'steeringWheel' || block.type === 'control') {
-      console.warn('Cannot remove the steering wheel or control block');
+    const block = this.blocks[blockIndex];
+    
+    // Check if this is a critical block (e.g., steering wheel)
+    if (block.type === 'control') {
+      console.warn("Cannot remove steering wheel block");
       return false;
     }
     
-    // Remove the block from the blocks array
-    this.blocks.splice(index, 1);
-    
-    // Remove the mesh from the group
+    // Remove the block's mesh from the group
     if (block.mesh) {
       if (block.mesh.parent) {
         block.mesh.parent.remove(block.mesh);
       }
       
-      // Dispose of geometry and materials to prevent memory leaks
+      // Dispose of geometry and material to free memory
       if (block.mesh.geometry) {
         block.mesh.geometry.dispose();
       }
@@ -185,16 +184,18 @@ class Ship {
           block.mesh.material.dispose();
         }
       }
-      
-      // Clear references
-      block.mesh.userData = {};
-      block.mesh = null;
     }
     
-    // Check if the ship has enough lift
+    // Remove the block from the blocks array
+    this.blocks.splice(blockIndex, 1);
+    
+    console.log(`Block removed from position ${JSON.stringify(position)}`);
+    
+    // Check if the ship still has enough lift
     this.checkLift();
     
-    console.log(`Block removed from ship at position: ${block.position.x}, ${block.position.y}, ${block.position.z}`);
+    // Fix any texture issues that might have occurred during removal
+    this.fixBlockTextureIssues();
     
     return true;
   }
@@ -462,6 +463,17 @@ class Ship {
       this.cleanupOrphanedMeshes();
       this._lastCleanupTime = 0;
     }
+    
+    // Periodically update block meshes (every 1 second)
+    if (!this._lastMeshUpdateTime) {
+      this._lastMeshUpdateTime = 0;
+    }
+    
+    this._lastMeshUpdateTime += deltaTime;
+    if (this._lastMeshUpdateTime > 1) {
+      this.updateBlockMeshes();
+      this._lastMeshUpdateTime = 0;
+    }
   }
 
   /**
@@ -481,24 +493,100 @@ class Ship {
   }
 
   /**
+   * Transform a position from ship-local coordinates to world coordinates
+   * @param {Object} localPos - The position in ship-local coordinates {x, y, z}
+   * @returns {Object} - The position in world coordinates {x, y, z}
+   */
+  localToWorldPosition(localPos) {
+    const sin = Math.sin(this.rotation);
+    const cos = Math.cos(this.rotation);
+    
+    return {
+      x: this.position.x + (localPos.x * cos - localPos.z * sin),
+      y: this.position.y + localPos.y,
+      z: this.position.z + (localPos.x * sin + localPos.z * cos)
+    };
+  }
+
+  /**
+   * Transform a position from world coordinates to ship-local coordinates
+   * @param {Object} worldPos - The position in world coordinates {x, y, z}
+   * @returns {Object} - The position in ship-local coordinates {x, y, z}
+   */
+  worldToLocalPosition(worldPos) {
+    // Translate to origin
+    const translatedPos = {
+      x: worldPos.x - this.position.x,
+      y: worldPos.y - this.position.y,
+      z: worldPos.z - this.position.z
+    };
+    
+    // Rotate around Y axis (inverse of ship rotation)
+    const sin = Math.sin(-this.rotation);
+    const cos = Math.cos(-this.rotation);
+    
+    return {
+      x: translatedPos.x * cos - translatedPos.z * sin,
+      y: translatedPos.y,
+      z: translatedPos.x * sin + translatedPos.z * cos
+    };
+  }
+
+  /**
    * Get the position of a block in world space
    * @param {Object} block - The block to get the position of
    * @returns {Object} - The world position {x, y, z}
    */
   getBlockWorldPosition(block) {
-    // Calculate the block's position relative to the ship's position and rotation
-    const relX = block.position.x;
-    const relY = block.position.y;
-    const relZ = block.position.z;
-    
-    const sin = Math.sin(this.rotation);
-    const cos = Math.cos(this.rotation);
-    
-    return {
-      x: this.position.x + (relX * cos - relZ * sin),
-      y: this.position.y + relY,
-      z: this.position.z + (relX * sin + relZ * cos)
+    return this.localToWorldPosition(block.position);
+  }
+
+  /**
+   * Find a block at the specified local position
+   * @param {Object} localPos - The position in ship-local coordinates {x, y, z}
+   * @returns {Object|null} - The block at the position, or null if no block exists
+   */
+  getBlockAtLocalPosition(localPos) {
+    // Round positions to ensure integer grid coordinates
+    const gridPos = {
+      x: Math.round(localPos.x),
+      y: Math.round(localPos.y),
+      z: Math.round(localPos.z)
     };
+    
+    return this.blocks.find(block => 
+      Math.round(block.position.x) === gridPos.x &&
+      Math.round(block.position.y) === gridPos.y &&
+      Math.round(block.position.z) === gridPos.z
+    );
+  }
+
+  /**
+   * Find a block at the specified world position
+   * @param {Object} worldPos - The position in world coordinates {x, y, z}
+   * @returns {Object|null} - The block at the position, or null if no block exists
+   */
+  getBlockAtWorldPosition(worldPos) {
+    const localPos = this.worldToLocalPosition(worldPos);
+    return this.getBlockAtLocalPosition(localPos);
+  }
+
+  /**
+   * Check if a block exists at the specified local position
+   * @param {Object} localPos - The position in ship-local coordinates {x, y, z}
+   * @returns {Boolean} - Whether a block exists at the position
+   */
+  hasBlockAtLocalPosition(localPos) {
+    return this.getBlockAtLocalPosition(localPos) !== undefined;
+  }
+
+  /**
+   * Check if a block exists at the specified world position
+   * @param {Object} worldPos - The position in world coordinates {x, y, z}
+   * @returns {Boolean} - Whether a block exists at the position
+   */
+  hasBlockAtWorldPosition(worldPos) {
+    return this.getBlockAtWorldPosition(worldPos) !== undefined;
   }
 
   /**
@@ -560,6 +648,63 @@ class Ship {
   }
 
   /**
+   * Validate and fix block-mesh position consistency
+   * This ensures that block meshes are positioned correctly according to their logical positions
+   */
+  validateBlockMeshPositions() {
+    console.log("Validating block-mesh positions...");
+    
+    let fixedCount = 0;
+    
+    for (const block of this.blocks) {
+      if (!block.mesh) continue;
+      
+      // The mesh position should match the block's logical position
+      // No need to apply ship rotation here as the mesh is a child of the ship group
+      // which already has the rotation applied
+      const expectedPosition = {
+        x: block.position.x,
+        y: block.position.y,
+        z: block.position.z
+      };
+      
+      // Check if the mesh position matches the expected position
+      const currentPosition = {
+        x: block.mesh.position.x,
+        y: block.mesh.position.y,
+        z: block.mesh.position.z
+      };
+      
+      // Calculate the difference
+      const diff = {
+        x: Math.abs(currentPosition.x - expectedPosition.x),
+        y: Math.abs(currentPosition.y - expectedPosition.y),
+        z: Math.abs(currentPosition.z - expectedPosition.z)
+      };
+      
+      // If the difference is significant, fix the mesh position
+      const threshold = 0.01; // Small threshold to account for floating point errors
+      if (diff.x > threshold || diff.y > threshold || diff.z > threshold) {
+        console.log(`Fixing mesh position for block at ${JSON.stringify(block.position)}`);
+        console.log(`  Current: ${JSON.stringify(currentPosition)}`);
+        console.log(`  Expected: ${JSON.stringify(expectedPosition)}`);
+        
+        // Set the mesh position to match the block position
+        block.mesh.position.set(
+          expectedPosition.x,
+          expectedPosition.y,
+          expectedPosition.z
+        );
+        
+        fixedCount++;
+      }
+    }
+    
+    console.log(`Validation complete. Fixed ${fixedCount} block mesh positions.`);
+    return fixedCount;
+  }
+
+  /**
    * Clean up orphaned meshes and ensure block-mesh consistency
    * This should be called periodically to prevent ghost blocks
    */
@@ -579,23 +724,30 @@ class Ship {
     // Step 2: Check each mesh to see if it has a corresponding block
     let orphanedMeshCount = 0;
     for (const mesh of meshes) {
-      // Get the position from the mesh
-      const meshPos = {
-        x: Math.round(mesh.position.x),
-        y: Math.round(mesh.position.y),
-        z: Math.round(mesh.position.z)
+      // Get the world position of the mesh
+      const worldPos = new THREE.Vector3();
+      mesh.getWorldPosition(worldPos);
+      
+      // Convert to ship-local coordinates
+      const localPos = this.worldToLocalPosition({
+        x: worldPos.x,
+        y: worldPos.y,
+        z: worldPos.z
+      });
+      
+      // Round to grid coordinates
+      const gridPos = {
+        x: Math.round(localPos.x),
+        y: Math.round(localPos.y),
+        z: Math.round(localPos.z)
       };
       
       // Check if there's a block at this position
-      const blockExists = this.blocks.some(block => 
-        block.position.x === meshPos.x &&
-        block.position.y === meshPos.y &&
-        block.position.z === meshPos.z
-      );
+      const blockExists = this.getBlockAtLocalPosition(gridPos);
       
       // If no block exists at this position, remove the mesh
       if (!blockExists) {
-        console.log(`Removing orphaned mesh at position: ${meshPos.x}, ${meshPos.y}, ${meshPos.z}`);
+        console.log(`Removing orphaned mesh at local position: ${gridPos.x}, ${gridPos.y}, ${gridPos.z}`);
         if (mesh.parent) {
           mesh.parent.remove(mesh);
         }
@@ -618,9 +770,321 @@ class Ship {
       }
     }
     
-    console.log(`Cleanup complete. Removed ${orphanedMeshCount} orphaned meshes and found ${blocksWithoutMeshCount} blocks without meshes.`);
+    // Step 4: Validate and fix block-mesh positions
+    const fixedPositionsCount = this.validateBlockMeshPositions();
     
-    return { orphanedMeshCount, blocksWithoutMeshCount };
+    console.log(`Cleanup complete. Removed ${orphanedMeshCount} orphaned meshes, found ${blocksWithoutMeshCount} blocks without meshes, and fixed ${fixedPositionsCount} mesh positions.`);
+    
+    return { orphanedMeshCount, blocksWithoutMeshCount, fixedPositionsCount };
+  }
+
+  /**
+   * Update all block meshes to match their logical positions
+   * This ensures visual representation matches the logical state
+   */
+  updateBlockMeshes() {
+    console.log("Updating block meshes...");
+    
+    // Helper function to get default color for a block type
+    const getDefaultColorForType = (type) => {
+      switch (type.toLowerCase()) {
+        case 'wood': return 0x8B4513;
+        case 'stone': return 0x808080;
+        case 'lift': return 0xFFD700;
+        case 'cannon': return 0x696969;
+        case 'control': return 0x8B0000;
+        default: return 0xAAAAAA;
+      }
+    };
+    
+    let updatedCount = 0;
+    
+    for (const block of this.blocks) {
+      if (!block.mesh) {
+        console.log(`Block at position ${JSON.stringify(block.position)} has no mesh, attempting to create one`);
+        
+        // Try to create a mesh if we have a resource loader
+        if (window.resourceLoader) {
+          try {
+            block.createMesh(this.group, window.resourceLoader);
+            console.log(`Created mesh for block at position ${JSON.stringify(block.position)}`);
+            updatedCount++;
+          } catch (error) {
+            console.error(`Failed to create mesh for block at position ${JSON.stringify(block.position)}:`, error);
+          }
+        } else {
+          console.warn(`Cannot create mesh for block at position ${JSON.stringify(block.position)} - no resource loader available`);
+        }
+        
+        continue;
+      }
+      
+      // Set the mesh position to match the block's logical position
+      block.mesh.position.set(
+        block.position.x,
+        block.position.y,
+        block.position.z
+      );
+      
+      // Set rotation if specified
+      if (block.rotation) {
+        block.mesh.rotation.y = block.rotation;
+      }
+      
+      // Check if the mesh has a material
+      if (!block.mesh.material) {
+        console.warn(`Block at position ${JSON.stringify(block.position)} has no material, attempting to create one`);
+        
+        // Try to create a material if we have a resource loader
+        if (window.resourceLoader) {
+          try {
+            const texture = window.resourceLoader.get(block.type);
+            if (texture) {
+              block.mesh.material = new THREE.MeshStandardMaterial({ 
+                map: texture,
+                roughness: 0.7,
+                metalness: 0.2
+              });
+              console.log(`Created material with texture for block at position ${JSON.stringify(block.position)}`);
+            } else {
+              // Use default color if texture loading failed
+              const color = block.getDefaultColor ? block.getDefaultColor() : getDefaultColorForType(block.type);
+              block.mesh.material = new THREE.MeshStandardMaterial({ 
+                color: color,
+                roughness: 0.7,
+                metalness: 0.2
+              });
+              console.log(`Created material with default color for block at position ${JSON.stringify(block.position)}`);
+            }
+            updatedCount++;
+          } catch (error) {
+            console.error(`Failed to create material for block at position ${JSON.stringify(block.position)}:`, error);
+          }
+        }
+      }
+      
+      // Ensure the mesh has the correct userData
+      block.mesh.userData.block = block;
+      block.mesh.userData.isBlock = true;
+      block.mesh.userData.type = block.type;
+      block.mesh.userData.gridPosition = { ...block.position };
+      
+      updatedCount++;
+    }
+    
+    // Force update the world matrix to ensure correct positioning
+    this.group.updateMatrixWorld(true);
+    
+    console.log(`Updated ${updatedCount} block meshes`);
+    return updatedCount;
+  }
+
+  /**
+   * Fix texture issues with blocks
+   * This method specifically targets known issues like blocks above the steering wheel
+   * turning gray
+   */
+  fixBlockTextureIssues() {
+    console.log("Fixing block texture issues...");
+    
+    // Helper function to get default color for a block type
+    const getDefaultColorForType = (type) => {
+      switch (type.toLowerCase()) {
+        case 'wood': return 0x8B4513;
+        case 'stone': return 0x808080;
+        case 'lift': return 0xFFD700;
+        case 'cannon': return 0x696969;
+        case 'control': return 0x8B0000;
+        default: return 0xAAAAAA;
+      }
+    };
+    
+    let fixedCount = 0;
+    
+    // Find the steering wheel block
+    const steeringWheel = this.blocks.find(block => block.type === 'control');
+    
+    if (steeringWheel) {
+      console.log("Found steering wheel at position:", steeringWheel.position);
+      
+      // Check blocks above the steering wheel
+      const blocksAboveSteeringWheel = this.blocks.filter(block => 
+        block.position.x === steeringWheel.position.x &&
+        block.position.z === steeringWheel.position.z &&
+        block.position.y > steeringWheel.position.y
+      );
+      
+      console.log(`Found ${blocksAboveSteeringWheel.length} blocks above the steering wheel`);
+      
+      // Fix textures for these blocks
+      for (const block of blocksAboveSteeringWheel) {
+        if (!block.mesh) continue;
+        
+        console.log(`Checking block of type ${block.type} at position:`, block.position);
+        
+        // Check if the material is missing or incorrect
+        const hasMissingTexture = !block.mesh.material || 
+                                 !block.mesh.material.map ||
+                                 (block.mesh.material.color && block.mesh.material.color.getHex() === 0xAAAAAA);
+        
+        if (hasMissingTexture) {
+          console.log(`Block at position ${JSON.stringify(block.position)} has texture issues, fixing...`);
+          
+          // Try to create a new material with the correct texture
+          if (window.resourceLoader) {
+            try {
+              const texture = window.resourceLoader.get(block.type);
+              if (texture) {
+                // Dispose of old material if it exists
+                if (block.mesh.material) {
+                  block.mesh.material.dispose();
+                }
+                
+                // Create new material with texture
+                block.mesh.material = new THREE.MeshStandardMaterial({ 
+                  map: texture,
+                  roughness: 0.7,
+                  metalness: 0.2
+                });
+                console.log(`Fixed texture for block at position ${JSON.stringify(block.position)}`);
+                fixedCount++;
+              } else {
+                // Use default color if texture loading failed
+                const color = block.getDefaultColor ? block.getDefaultColor() : getDefaultColorForType(block.type);
+                
+                // Dispose of old material if it exists
+                if (block.mesh.material) {
+                  block.mesh.material.dispose();
+                }
+                
+                // Create new material with default color
+                block.mesh.material = new THREE.MeshStandardMaterial({ 
+                  color: color,
+                  roughness: 0.7,
+                  metalness: 0.2
+                });
+                console.log(`Created material with default color for block at position ${JSON.stringify(block.position)}`);
+                fixedCount++;
+              }
+            } catch (error) {
+              console.error(`Failed to fix texture for block at position ${JSON.stringify(block.position)}:`, error);
+            }
+          }
+        }
+      }
+    }
+    
+    // Also check for any blocks with missing or incorrect textures
+    for (const block of this.blocks) {
+      if (!block.mesh) continue;
+      
+      // Skip blocks we've already checked (above the steering wheel)
+      if (steeringWheel && 
+          block.position.x === steeringWheel.position.x &&
+          block.position.z === steeringWheel.position.z &&
+          block.position.y > steeringWheel.position.y) {
+        continue;
+      }
+      
+      // Check if the material is missing or incorrect
+      const hasMissingTexture = !block.mesh.material || 
+                               !block.mesh.material.map ||
+                               (block.mesh.material.color && block.mesh.material.color.getHex() === 0xAAAAAA);
+      
+      if (hasMissingTexture) {
+        console.log(`Block of type ${block.type} at position ${JSON.stringify(block.position)} has texture issues, fixing...`);
+        
+        // Try to create a new material with the correct texture
+        if (window.resourceLoader) {
+          try {
+            const texture = window.resourceLoader.get(block.type);
+            if (texture) {
+              // Dispose of old material if it exists
+              if (block.mesh.material) {
+                block.mesh.material.dispose();
+              }
+              
+              // Create new material with texture
+              block.mesh.material = new THREE.MeshStandardMaterial({ 
+                map: texture,
+                roughness: 0.7,
+                metalness: 0.2
+              });
+              console.log(`Fixed texture for block at position ${JSON.stringify(block.position)}`);
+              fixedCount++;
+            } else {
+              // Use default color if texture loading failed
+              const color = block.getDefaultColor ? block.getDefaultColor() : getDefaultColorForType(block.type);
+              
+              // Dispose of old material if it exists
+              if (block.mesh.material) {
+                block.mesh.material.dispose();
+              }
+              
+              // Create new material with default color
+              block.mesh.material = new THREE.MeshStandardMaterial({ 
+                color: color,
+                roughness: 0.7,
+                metalness: 0.2
+              });
+              console.log(`Created material with default color for block at position ${JSON.stringify(block.position)}`);
+              fixedCount++;
+            }
+          } catch (error) {
+            console.error(`Failed to fix texture for block at position ${JSON.stringify(block.position)}:`, error);
+          }
+        }
+      }
+    }
+    
+    console.log(`Fixed textures for ${fixedCount} blocks`);
+    return fixedCount;
+  }
+
+  /**
+   * Break a block at the given position
+   * @param {Object} position - The position of the block to break
+   * @param {Object} options - Additional options
+   * @returns {Object|null} - The broken block or null if no block was broken
+   */
+  breakBlock(position, options = {}) {
+    console.log(`Breaking block at position: ${JSON.stringify(position)}`);
+    
+    // Find the block at the given position
+    const block = this.blocks.find(block => 
+      block.position.x === position.x &&
+      block.position.y === position.y &&
+      block.position.z === position.z
+    );
+    
+    if (!block) {
+      console.warn(`No block found at position ${JSON.stringify(position)}`);
+      return null;
+    }
+    
+    // Check if this is a critical block (e.g., steering wheel)
+    if (block.type === 'control' && !options.allowBreakingCritical) {
+      console.warn("Cannot break steering wheel block");
+      return null;
+    }
+    
+    // Remove the block
+    const removed = this.removeBlock(position);
+    
+    if (!removed) {
+      console.warn(`Failed to remove block at position ${JSON.stringify(position)}`);
+      return null;
+    }
+    
+    // Create a drop if specified
+    if (options.createDrop && typeof options.createDrop === 'function') {
+      options.createDrop(block);
+    }
+    
+    // Fix any texture issues that might have occurred during breaking
+    this.fixBlockTextureIssues();
+    
+    return block;
   }
 }
 

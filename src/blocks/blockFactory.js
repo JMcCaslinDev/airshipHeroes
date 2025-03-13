@@ -16,11 +16,15 @@ class BlockFactory {
    * @returns {Object} - The created block
    */
   static createBlock(type, position, options = {}) {
+    // Normalize the type to lowercase
+    const normalizedType = type.toLowerCase();
+    
     // Create a generic block with the specified type
     const block = {
-      type: type.toLowerCase(),
+      type: normalizedType,
       position: { ...position },
-      health: 100,
+      health: options.health || 100,
+      rotation: options.rotation || 0,
       mesh: null,
       
       // Create mesh for the block
@@ -31,28 +35,67 @@ class BlockFactory {
         // Get texture for the block type
         let texture;
         try {
-          texture = textureLoader.get(this.type);
+          if (textureLoader && typeof textureLoader.get === 'function') {
+            texture = textureLoader.get(this.type);
+            console.log(`Successfully loaded texture for block type: ${this.type}`);
+          } else {
+            console.warn(`TextureLoader not available or missing get method for block type: ${this.type}`);
+          }
         } catch (error) {
           console.error(`Failed to load texture for block type: ${this.type}`, error);
         }
         
         // Create material
-        const material = texture 
-          ? new THREE.MeshStandardMaterial({ map: texture }) 
-          : new THREE.MeshStandardMaterial({ color: this.getDefaultColor() });
+        let material;
+        if (texture) {
+          material = new THREE.MeshStandardMaterial({ 
+            map: texture,
+            // Add these properties to improve texture appearance
+            roughness: 0.7,
+            metalness: 0.2
+          });
+        } else {
+          // Use default color if texture loading failed
+          const color = this.getDefaultColor();
+          console.warn(`Using default color ${color.toString(16)} for block type: ${this.type}`);
+          material = new THREE.MeshStandardMaterial({ 
+            color: color,
+            roughness: 0.7,
+            metalness: 0.2
+          });
+        }
         
         // Create mesh
         this.mesh = new THREE.Mesh(geometry, material);
+        
+        // Set position
         this.mesh.position.set(this.position.x, this.position.y, this.position.z);
+        
+        // Set rotation if specified
+        if (this.rotation) {
+          this.mesh.rotation.y = this.rotation;
+        }
+        
         this.mesh.castShadow = true;
         this.mesh.receiveShadow = true;
         
         // Set userData to reference this block
         this.mesh.userData.block = this;
         this.mesh.userData.isBlock = true;
+        this.mesh.userData.type = this.type;
+        this.mesh.userData.gridPosition = { ...this.position };
         
         // Add to group
-        group.add(this.mesh);
+        if (group) {
+          group.add(this.mesh);
+          
+          // Force update the world matrix to ensure correct positioning
+          this.mesh.updateMatrixWorld(true);
+          
+          console.log(`Added mesh for ${this.type} block to group at position:`, this.position);
+        } else {
+          console.error("No group provided to add mesh to");
+        }
       },
       
       // Get default color for the block type
@@ -65,6 +108,43 @@ class BlockFactory {
           case 'control': return 0x8B0000;
           default: return 0xAAAAAA;
         }
+      },
+      
+      // Get the world position of this block
+      getWorldPosition(ship) {
+        if (!ship) return { ...this.position };
+        
+        // Use ship's transformation function if available
+        if (ship.localToWorldPosition) {
+          return ship.localToWorldPosition(this.position);
+        }
+        
+        // Fallback to simple addition if ship doesn't have transformation function
+        return {
+          x: ship.position.x + this.position.x,
+          y: ship.position.y + this.position.y,
+          z: ship.position.z + this.position.z
+        };
+      },
+      
+      // Get the collision box for this block
+      getCollisionBox(ship) {
+        const worldPos = this.getWorldPosition(ship);
+        const box = new THREE.Box3();
+        
+        box.min.set(
+          worldPos.x - 0.5,
+          worldPos.y - 0.5,
+          worldPos.z - 0.5
+        );
+        
+        box.max.set(
+          worldPos.x + 0.5,
+          worldPos.y + 0.5,
+          worldPos.z + 0.5
+        );
+        
+        return box;
       }
     };
     

@@ -51,7 +51,11 @@ const inputHandler = createInputHandler({
     }
   },
   onMouseUp: (event) => {
-    // Handle mouse up events if needed
+    if (gameState.mode === 'ship' && shipModeController && shipModeController.handleMouseUp) {
+      shipModeController.handleMouseUp(event);
+    } else if (gameState.mode === 'player' && playerModeController && playerModeController.handleMouseUp) {
+      playerModeController.handleMouseUp(event);
+    }
   },
   onMouseWheel: (delta) => {
     if (gameState.mode === 'ship' && shipModeController) {
@@ -168,13 +172,15 @@ function updateLoadingProgress(progress) {
  * Called when all resources are loaded
  */
 function onResourcesLoaded() {
-  console.log('All resources loaded, transitioning to login screen');
+  console.log("All resources loaded successfully");
   
   // Make resource loader globally available
   window.resourceLoader = resourceLoader;
   
-  // Use UI manager to hide loading screen and show login screen
+  // Hide loading screen
   uiManager.hideLoadingScreen();
+  
+  // Show login screen
   uiManager.showLoginScreen();
   
   // Also directly manipulate the DOM as a fallback
@@ -196,6 +202,17 @@ function onResourcesLoaded() {
   
   // Create skybox
   renderer.createSkybox();
+  
+  // Fix texture issues on all ships if any exist
+  if (gameState && gameState.ships) {
+    console.log("Fixing texture issues on all ships...");
+    gameState.ships.forEach(ship => {
+      if (ship && typeof ship.fixBlockTextureIssues === 'function') {
+        const fixedCount = ship.fixBlockTextureIssues();
+        console.log(`Fixed textures for ${fixedCount} blocks on ship ${ship.name || 'unnamed'}`);
+      }
+    });
+  }
 }
 
 /**
