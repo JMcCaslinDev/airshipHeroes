@@ -437,6 +437,9 @@ class Ship {
       // Ensure the group is visible
       this.group.visible = true;
       
+      // Force update the world matrix of the group and all its children
+      this.group.updateMatrixWorld(true);
+      
       // Log position periodically
       if (Math.random() < 0.01) {
         console.log(`Ship position: ${JSON.stringify(this.position)}`);
@@ -538,6 +541,23 @@ class Ship {
    * @returns {Object} - The world position {x, y, z}
    */
   getBlockWorldPosition(block) {
+    // If the block has a mesh, use its world position for accuracy
+    if (block.mesh) {
+      // Ensure the matrix is up to date
+      block.mesh.updateMatrixWorld(true);
+      
+      // Get the world position from the mesh
+      const worldPosition = new THREE.Vector3();
+      worldPosition.setFromMatrixPosition(block.mesh.matrixWorld);
+      
+      return {
+        x: worldPosition.x,
+        y: worldPosition.y,
+        z: worldPosition.z
+      };
+    }
+    
+    // Fallback to mathematical transformation if no mesh is available
     return this.localToWorldPosition(block.position);
   }
 

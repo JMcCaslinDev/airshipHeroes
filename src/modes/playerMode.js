@@ -1018,16 +1018,12 @@ export function createPlayerModeController(player, camera) {
     let onGround = false;
     
     player.ship.blocks.forEach(block => {
-      const blockWorldPos = {
-        x: player.ship.position.x + block.position.x,
-        y: player.ship.position.y + block.position.y,
-        z: player.ship.position.z + block.position.z
-      };
+      // Skip blocks without meshes
+      if (!block.mesh) return;
       
-      const blockBox = new THREE.Box3().setFromCenterAndSize(
-        new THREE.Vector3(blockWorldPos.x, blockWorldPos.y, blockWorldPos.z),
-        new THREE.Vector3(1, 1, 1)
-      );
+      // Get the collision box for this block using the improved method
+      // This accounts for ship rotation properly
+      const blockBox = block.getCollisionBox(player.ship);
       
       if (characterBox.intersectsBox(blockBox)) {
         // Determine which side of the block was hit
@@ -1037,11 +1033,9 @@ export function createPlayerModeController(player, camera) {
           player.character.position.z
         );
         
-        const blockCenter = new THREE.Vector3(
-          blockWorldPos.x,
-          blockWorldPos.y,
-          blockWorldPos.z
-        );
+        // Get the center of the block's collision box
+        const blockCenter = new THREE.Vector3();
+        blockBox.getCenter(blockCenter);
         
         const direction = new THREE.Vector3().subVectors(characterCenter, blockCenter);
         const distance = direction.length();

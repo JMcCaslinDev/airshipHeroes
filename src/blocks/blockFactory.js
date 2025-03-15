@@ -132,17 +132,33 @@ class BlockFactory {
         const worldPos = this.getWorldPosition(ship);
         const box = new THREE.Box3();
         
-        box.min.set(
-          worldPos.x - 0.5,
-          worldPos.y - 0.5,
-          worldPos.z - 0.5
-        );
-        
-        box.max.set(
-          worldPos.x + 0.5,
-          worldPos.y + 0.5,
-          worldPos.z + 0.5
-        );
+        if (ship && ship.rotation !== 0 && this.mesh) {
+          // For rotated ships, use the mesh's world matrix to calculate the correct box
+          // This ensures the hitbox aligns with the visual mesh at all rotations
+          this.mesh.updateMatrixWorld(true);
+          
+          // Create a box that fits the mesh in its local space
+          const localBox = new THREE.Box3(
+            new THREE.Vector3(-0.5, -0.5, -0.5),
+            new THREE.Vector3(0.5, 0.5, 0.5)
+          );
+          
+          // Transform the box to world space using the mesh's world matrix
+          box.copy(localBox).applyMatrix4(this.mesh.matrixWorld);
+        } else {
+          // Fallback to simple box calculation for non-rotated ships or blocks without meshes
+          box.min.set(
+            worldPos.x - 0.5,
+            worldPos.y - 0.5,
+            worldPos.z - 0.5
+          );
+          
+          box.max.set(
+            worldPos.x + 0.5,
+            worldPos.y + 0.5,
+            worldPos.z + 0.5
+          );
+        }
         
         return box;
       }

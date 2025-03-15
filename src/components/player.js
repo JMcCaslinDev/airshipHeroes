@@ -752,59 +752,57 @@ class Player {
               // Also save the inventory state
               this.saveInventory();
             } else {
-              console.log("Block could not be removed (might be a critical block)");
-            }
-          } else {
-            console.error("No block data found on mesh");
+              console.error("No block data found on mesh");
             
-            // Try to find the block by world position
-            // Convert the intersection point to ship-local coordinates
-            const localPos = this.ship.worldToLocalPosition({
-              x: intersectionPoint.x,
-              y: intersectionPoint.y,
-              z: intersectionPoint.z
-            });
-            
-            console.log("Intersection point (local):", localPos);
-            
-            // Find the block at this position
-            const blockAtPosition = this.ship.getBlockAtLocalPosition(localPos);
-            
-            if (blockAtPosition) {
-              console.log(`Found block by position: ${blockAtPosition.type} at local position:`, blockAtPosition.position);
+              // Try to find the block by world position
+              // Convert the intersection point to ship-local coordinates
+              const localPos = this.ship.worldToLocalPosition({
+                x: intersectionPoint.x,
+                y: intersectionPoint.y,
+                z: intersectionPoint.z
+              });
               
-              // Store block type before removal
-              const blockType = blockAtPosition.type;
+              console.log("Intersection point (local):", localPos);
               
-              // Try to remove the block from the ship
-              const removed = this.ship.removeBlock(blockAtPosition.position);
+              // Find the block at this position
+              const blockAtPosition = this.ship.getBlockAtLocalPosition(localPos);
               
-              if (removed) {
-                console.log("Block successfully removed by position");
+              if (blockAtPosition) {
+                console.log(`Found block by position: ${blockAtPosition.type} at local position:`, blockAtPosition.position);
                 
-                // Add to inventory
-                this.addToInventory({ type: blockType });
+                // Store block type before removal
+                const blockType = blockAtPosition.type;
                 
-                // Save ship and inventory
-                if (this.shipStorage && this.username) {
-                  try {
-                    const shipDefinition = this.ship.serialize();
-                    this.shipStorage.saveShip(this.username, shipDefinition);
-                  } catch (error) {
-                    console.error("Error saving ship to localStorage:", error);
+                // Try to remove the block from the ship
+                const removed = this.ship.removeBlock(blockAtPosition.position);
+                
+                if (removed) {
+                  console.log("Block successfully removed by position");
+                  
+                  // Add to inventory
+                  this.addToInventory({ type: blockType });
+                  
+                  // Save ship and inventory
+                  if (this.shipStorage && this.username) {
+                    try {
+                      const shipDefinition = this.ship.serialize();
+                      this.shipStorage.saveShip(this.username, shipDefinition);
+                    } catch (error) {
+                      console.error("Error saving ship to localStorage:", error);
+                    }
                   }
+                  this.saveInventory();
+                } else {
+                  console.log("Block could not be removed (might be a critical block)");
                 }
-                this.saveInventory();
               } else {
-                console.log("Block could not be removed (might be a critical block)");
-              }
-            } else {
-              console.error("Could not find block at local position:", localPos);
-              
-              // As a last resort, remove the mesh from the scene
-              if (mesh.parent) {
-                mesh.parent.remove(mesh);
-                console.log("Removed orphaned mesh from scene");
+                console.error("Could not find block at local position:", localPos);
+                
+                // As a last resort, remove the mesh from the scene
+                if (mesh.parent) {
+                  mesh.parent.remove(mesh);
+                  console.log("Removed orphaned mesh from scene");
+                }
               }
             }
           }
@@ -1783,27 +1781,13 @@ class Player {
         // Skip blocks without meshes
         if (!block.mesh) continue;
         
-        // Get block position in world space using the ship's getBlockWorldPosition method
-        const blockWorldPos = this.ship.getBlockWorldPosition(block);
-        
-        // Create a box for the block
-        const blockBox = new THREE.Box3();
-        blockBox.min.set(
-          blockWorldPos.x - 0.5,
-          blockWorldPos.y - 0.5,
-          blockWorldPos.z - 0.5
-        );
-        
-        blockBox.max.set(
-          blockWorldPos.x + 0.5,
-          blockWorldPos.y + 0.5,
-          blockWorldPos.z + 0.5
-        );
+        // Get the collision box for this block using the improved method
+        const blockBox = block.getCollisionBox(this.ship);
         
         // Check for intersection
         if (characterBox.intersectsBox(blockBox)) {
           collisionDetected = true;
-          console.log(`Collision with block at local position ${JSON.stringify(block.position)}, world position ${JSON.stringify(blockWorldPos)}`);
+          console.log(`Collision with block at local position ${JSON.stringify(block.position)}`);
           break;
         }
       }
@@ -1837,22 +1821,8 @@ class Player {
         for (const block of this.ship.blocks) {
           if (!block.mesh) continue;
           
-          // Get block position in world space
-          const blockWorldPos = this.ship.getBlockWorldPosition(block);
-          
-          // Create a box for the block
-          const blockBox = new THREE.Box3();
-          blockBox.min.set(
-            blockWorldPos.x - 0.5,
-            blockWorldPos.y - 0.5,
-            blockWorldPos.z - 0.5
-          );
-          
-          blockBox.max.set(
-            blockWorldPos.x + 0.5,
-            blockWorldPos.y + 0.5,
-            blockWorldPos.z + 0.5
-          );
+          // Get the collision box for this block using the improved method
+          const blockBox = block.getCollisionBox(this.ship);
           
           if (characterBox.intersectsBox(blockBox)) {
             xCollision = true;
@@ -1885,22 +1855,8 @@ class Player {
         for (const block of this.ship.blocks) {
           if (!block.mesh) continue;
           
-          // Get block position in world space
-          const blockWorldPos = this.ship.getBlockWorldPosition(block);
-          
-          // Create a box for the block
-          const blockBox = new THREE.Box3();
-          blockBox.min.set(
-            blockWorldPos.x - 0.5,
-            blockWorldPos.y - 0.5,
-            blockWorldPos.z - 0.5
-          );
-          
-          blockBox.max.set(
-            blockWorldPos.x + 0.5,
-            blockWorldPos.y + 0.5,
-            blockWorldPos.z + 0.5
-          );
+          // Get the collision box for this block using the improved method
+          const blockBox = block.getCollisionBox(this.ship);
           
           if (characterBox.intersectsBox(blockBox)) {
             zCollision = true;
