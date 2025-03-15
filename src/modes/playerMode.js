@@ -1045,48 +1045,58 @@ export function createPlayerModeController(player, camera) {
         let normal = new THREE.Vector3(0, 0, 0);
         let penetration = 0;
         
-        if (Math.abs(direction.y) > Math.abs(direction.x) && Math.abs(direction.y) > Math.abs(direction.z)) {
-          // Vertical collision
-          if (direction.y > 0) {
-            // Bottom collision
+        // Calculate the absolute differences in each axis
+        const dx = Math.abs(characterCenter.x - blockCenter.x);
+        const dy = Math.abs(characterCenter.y - blockCenter.y);
+        const dz = Math.abs(characterCenter.z - blockCenter.z);
+        
+        // Get the block size (assuming 1x1x1 blocks)
+        const blockSize = 1.0;
+        const characterWidth = 0.6; // Character width/depth
+        const characterHeight = 1.8; // Character height
+        
+        // Calculate penetration depths for each axis
+        const penX = (blockSize/2 + characterWidth/2) - dx;
+        const penY = (blockSize/2 + characterHeight/2) - dy;
+        const penZ = (blockSize/2 + characterWidth/2) - dz;
+        
+        // Find the axis with the smallest penetration (this is the collision normal)
+        if (penX <= penY && penX <= penZ) {
+          // X-axis collision
+          normal.set(characterCenter.x > blockCenter.x ? 1 : -1, 0, 0);
+          penetration = penX;
+        } else if (penY <= penX && penY <= penZ) {
+          // Y-axis collision
+          if (characterCenter.y > blockCenter.y) {
+            // Bottom collision (player is above block)
             normal.set(0, 1, 0);
-            penetration = 1.0 + 0.9 - (characterCenter.y - blockCenter.y);
+            penetration = penY;
             onGround = true;
             player.character.isJumping = false;
           } else {
-            // Top collision
+            // Top collision (player is below block)
             normal.set(0, -1, 0);
-            penetration = 1.0 + 0.9 - (blockCenter.y - characterCenter.y);
+            penetration = penY;
             player.character.velocity.y = 0;
-          }
-        } else if (Math.abs(direction.x) > Math.abs(direction.z)) {
-          // X-axis collision
-          if (direction.x > 0) {
-            // Left collision
-            normal.set(1, 0, 0);
-            penetration = 1.0 + 0.3 - (characterCenter.x - blockCenter.x);
-          } else {
-            // Right collision
-            normal.set(-1, 0, 0);
-            penetration = 1.0 + 0.3 - (blockCenter.x - characterCenter.x);
           }
         } else {
           // Z-axis collision
-          if (direction.z > 0) {
-            // Front collision
-            normal.set(0, 0, 1);
-            penetration = 1.0 + 0.3 - (characterCenter.z - blockCenter.z);
-          } else {
-            // Back collision
-            normal.set(0, 0, -1);
-            penetration = 1.0 + 0.3 - (blockCenter.z - characterCenter.z);
-          }
+          normal.set(0, 0, characterCenter.z > blockCenter.z ? 1 : -1);
+          penetration = penZ;
         }
         
         // Resolve collision - only move the player, not the ship
         if (penetration > 0) {
+          // Only apply position correction for the axis of collision
+          // This prevents snapping to the top when bumping horizontally
           player.character.position.x += normal.x * penetration;
-          player.character.position.y += normal.y * penetration;
+          
+          // Only apply Y correction if it's a true vertical collision
+          // This prevents snapping to the top when bumping horizontally
+          if (normal.y !== 0) {
+            player.character.position.y += normal.y * penetration;
+          }
+          
           player.character.position.z += normal.z * penetration;
           
           // Zero out velocity in the direction of the normal

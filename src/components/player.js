@@ -1799,7 +1799,7 @@ class Player {
         // Try X movement only
         const xOnlyPosition = {
           x: previousPosition.x + this.character.velocity.x,
-          y: newPosition.y,
+          y: previousPosition.y, // Keep the same Y position as before
           z: previousPosition.z
         };
         
@@ -1833,7 +1833,7 @@ class Player {
         // Try Z movement only
         const zOnlyPosition = {
           x: previousPosition.x,
-          y: newPosition.y,
+          y: previousPosition.y, // Keep the same Y position as before
           z: previousPosition.z + this.character.velocity.z
         };
         
@@ -1875,6 +1875,141 @@ class Player {
           // Both directions have collisions, don't move horizontally
           newPosition.x = previousPosition.x;
           newPosition.z = previousPosition.z;
+        }
+        
+        // Handle vertical movement separately
+        // Check if we need to adjust vertical position due to landing on a block
+        const verticalCheckPosition = {
+          x: newPosition.x,
+          y: previousPosition.y + this.character.velocity.y * deltaTime,
+          z: newPosition.z
+        };
+        
+        // Create a box for vertical collision check
+        const verticalBox = new THREE.Box3();
+        verticalBox.min.set(
+          verticalCheckPosition.x - characterSize.width / 2,
+          verticalCheckPosition.y,
+          verticalCheckPosition.z - characterSize.width / 2
+        );
+        
+        verticalBox.max.set(
+          verticalCheckPosition.x + characterSize.width / 2,
+          verticalCheckPosition.y + characterSize.height,
+          verticalCheckPosition.z + characterSize.width / 2
+        );
+        
+        // Check for vertical collisions
+        let verticalCollision = false;
+        let highestBlockY = -Infinity;
+        let lowestBlockBottom = Infinity;
+        let isStandingOnBlock = false;
+        
+        for (const block of this.ship.blocks) {
+          if (!block.mesh) continue;
+          
+          const blockBox = block.getCollisionBox(this.ship);
+          
+          // First, check if the player is standing on this block
+          // Create a ray starting from the player's feet and going down
+          const rayStart = new THREE.Vector3(
+            verticalCheckPosition.x,
+            verticalCheckPosition.y + 0.1, // Slightly above the player's feet
+            verticalCheckPosition.z
+          );
+          
+          const rayDirection = new THREE.Vector3(0, -1, 0); // Straight down
+          const raycaster = new THREE.Raycaster(rayStart, rayDirection, 0, 0.2); // Short ray
+          
+          // Create a box for the raycaster to intersect with
+          const blockGeometry = new THREE.BoxGeometry(1, 1, 1);
+          const blockMesh = new THREE.Mesh(blockGeometry);
+          blockMesh.position.set(
+            (blockBox.min.x + blockBox.max.x) / 2,
+            (blockBox.min.y + blockBox.max.y) / 2,
+            (blockBox.min.z + blockBox.max.z) / 2
+          );
+          
+          // Scale the mesh to match the block box
+          blockMesh.scale.set(
+            blockBox.max.x - blockBox.min.x,
+            blockBox.max.y - blockBox.min.y,
+            blockBox.max.z - blockBox.min.z
+          );
+          
+          // Check for intersection
+          const intersects = raycaster.intersectObject(blockMesh);
+          if (intersects.length > 0) {
+            isStandingOnBlock = true;
+            highestBlockY = blockBox.max.y;
+          }
+          
+          // Clean up temporary mesh
+          blockGeometry.dispose();
+          
+          // Also check for regular collisions
+          if (verticalBox.intersectsBox(blockBox)) {
+            // Determine if this is a true vertical collision or a side collision
+            // Calculate the horizontal overlap
+            const horizontalOverlap = Math.min(
+              Math.abs(verticalBox.max.x - blockBox.min.x),
+              Math.abs(blockBox.max.x - verticalBox.min.x),
+              Math.abs(verticalBox.max.z - blockBox.min.z),
+              Math.abs(blockBox.max.z - verticalBox.min.z)
+            );
+            
+            // Calculate the vertical overlap
+            const verticalOverlap = Math.min(
+              Math.abs(verticalBox.max.y - blockBox.min.y),
+              Math.abs(blockBox.max.y - verticalBox.min.y)
+            );
+            
+            // Only consider it a vertical collision if the vertical overlap is significant
+            // compared to the horizontal overlap
+            if (verticalOverlap < horizontalOverlap * 0.8) {
+              verticalCollision = true;
+              
+              // Get the top of the block
+              const blockTop = blockBox.max.y;
+              const blockBottom = blockBox.min.y;
+              
+              // Keep track of the highest block we're colliding with
+              if (blockTop > highestBlockY) {
+                highestBlockY = blockTop;
+              }
+              
+              // Keep track of the lowest block bottom we're colliding with
+              if (blockBottom < lowestBlockBottom) {
+                lowestBlockBottom = blockBottom;
+              }
+            }
+          }
+        }
+        
+        if (isStandingOnBlock) {
+          // If the player is standing on a block, place them on top of it
+          newPosition.y = highestBlockY;
+          this.character.velocity.y = 0;
+          this.character.isJumping = false;
+        } else if (verticalCollision) {
+          // If falling or moving down, place the character on top of the highest block
+          if (this.character.velocity.y <= 0 && 
+              Math.abs(previousPosition.y - highestBlockY) < 0.2) {
+            newPosition.y = highestBlockY;
+            this.character.velocity.y = 0;
+            this.character.isJumping = false;
+          } else if (this.character.velocity.y > 0 && 
+                    Math.abs(previousPosition.y + characterSize.height - lowestBlockBottom) < 0.2) {
+            // If moving up and hitting the bottom of a block
+            newPosition.y = previousPosition.y;
+            this.character.velocity.y = 0;
+          } else {
+            // If it's not a clear top or bottom collision, don't adjust Y
+            newPosition.y = verticalCheckPosition.y;
+          }
+        } else {
+          // No vertical collision, apply normal vertical movement
+          newPosition.y = verticalCheckPosition.y;
         }
       }
     }
