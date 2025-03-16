@@ -75,7 +75,7 @@ export function createPlayerModeController(player, camera) {
     // Position character at ship's control block
     if (player.ship) {
       // Find the control block
-      const controlBlock = player.ship.blocks.find(block => block.type === 'control');
+      const controlBlock = player.ship.blockManager.blocks.find(block => block.type === 'control');
       
       if (controlBlock) {
         console.log('Found control block at position:', controlBlock.position);
@@ -410,7 +410,12 @@ export function createPlayerModeController(player, camera) {
    * @param {MouseEvent} event - The mouse event
    */
   function handleMouseDown(event) {
-    if (!state.active) return;
+    console.log(`Mouse down event: button=${event.button}, active=${state.active}, leftMouseDown=${state.leftMouseDown}, rightMouseDown=${state.rightMouseDown}, processingBlockAction=${state.processingBlockAction}`);
+    
+    if (!state.active) {
+      console.log("Player mode not active, ignoring mouse down");
+      return;
+    }
     
     // Prevent default behavior to avoid text selection and context menus
     event.preventDefault();
@@ -436,6 +441,8 @@ export function createPlayerModeController(player, camera) {
     
     // Right click: place block
     if (event.button === 2) {
+      console.log("Right mouse button detected");
+      
       // Only process if we haven't already processed a right click
       if (!state.rightMouseDown && !state.processingBlockAction) {
         console.log("Right mouse button pressed - placing block");
@@ -444,10 +451,11 @@ export function createPlayerModeController(player, camera) {
         
         // Add a tiny delay to ensure we're not catching multiple events
         requestAnimationFrame(() => {
+          console.log("Calling placeBlock from requestAnimationFrame");
           placeBlock();
         });
       } else {
-        console.log("Right mouse already down or processing action - ignoring");
+        console.log(`Right mouse already down or processing action - ignoring. rightMouseDown=${state.rightMouseDown}, processingBlockAction=${state.processingBlockAction}`);
       }
       return;
     }
@@ -458,7 +466,12 @@ export function createPlayerModeController(player, camera) {
    * @param {MouseEvent} event - The mouse event
    */
   function handleMouseUp(event) {
-    if (!state.active) return;
+    console.log(`Mouse up event: button=${event.button}, active=${state.active}, leftMouseDown=${state.leftMouseDown}, rightMouseDown=${state.rightMouseDown}, processingBlockAction=${state.processingBlockAction}`);
+    
+    if (!state.active) {
+      console.log("Player mode not active, ignoring mouse up");
+      return;
+    }
     
     // Prevent default behavior
     event.preventDefault();
@@ -471,6 +484,7 @@ export function createPlayerModeController(player, camera) {
       // Reset processing flag after a short delay to prevent rapid re-clicks
       setTimeout(() => {
         if (!state.leftMouseDown) {
+          console.log("Resetting processingBlockAction flag after left mouse up");
           state.processingBlockAction = false;
         }
       }, 100); // Shorter delay for better responsiveness
@@ -482,6 +496,7 @@ export function createPlayerModeController(player, camera) {
       // Reset processing flag after a short delay to prevent rapid re-clicks
       setTimeout(() => {
         if (!state.rightMouseDown) {
+          console.log("Resetting processingBlockAction flag after right mouse up");
           state.processingBlockAction = false;
         }
       }, 100); // Shorter delay for better responsiveness
@@ -492,18 +507,32 @@ export function createPlayerModeController(player, camera) {
    * Place a block
    */
   function placeBlock() {
+    console.log("placeBlock function called");
+    
     if (state.processingBlockAction) {
       console.log("Already processing a block action, ignoring");
       return;
     }
+    
+    state.processingBlockAction = true; // Set the flag to prevent multiple calls
+    console.log("Processing block action started");
     
     try {
       // Get selected block type from inventory
       const selectedSlot = player.inventory.selectedSlot;
       const inventorySlot = player.inventory.slots[selectedSlot];
       
+      console.log("Inventory check:", {
+        selectedSlot,
+        inventorySlot: inventorySlot ? {
+          type: inventorySlot.type,
+          count: inventorySlot.count
+        } : null
+      });
+      
       if (!inventorySlot || !inventorySlot.type || inventorySlot.count <= 0) {
         console.log('No block selected or no blocks left in inventory');
+        state.processingBlockAction = false;
         return;
       }
       
@@ -564,19 +593,27 @@ export function createPlayerModeController(player, camera) {
       // Perform raycasting only on valid block meshes
       const intersects = placementRaycaster.intersectObjects(blockMeshes, false);
       
+      console.log(`Raycasting results: ${intersects.length} intersections found`);
+      
       // No intersections found - log and exit
       if (intersects.length === 0) {
         console.log('No intersections found with block meshes');
+        state.processingBlockAction = false;
         return;
       }
       
       // Only consider the first (closest) intersection
       const intersect = intersects[0];
-      console.log(`Found intersection at distance ${intersect.distance.toFixed(4)}`);
+      console.log(`Found intersection at distance ${intersect.distance.toFixed(4)} with object:`, {
+        type: intersect.object.userData.type,
+        position: intersect.object.userData.gridPosition || 
+                 (intersect.object.userData.block ? intersect.object.userData.block.position : 'unknown')
+      });
       
       // Check if the block is within reach
       if (intersect.distance > state.maxPlaceDistance) {
         console.log(`Too far to place block (${intersect.distance.toFixed(4)} > ${state.maxPlaceDistance})`);
+        state.processingBlockAction = false;
         return;
       }
       
@@ -600,7 +637,7 @@ export function createPlayerModeController(player, camera) {
       };
       
       // Validate the position is not occupied
-      const existingBlock = player.ship.blocks.find(block => 
+      const existingBlock = player.ship.blockManager.blocks.find(block => 
         block.position.x === newBlockPosition.x &&
         block.position.y === newBlockPosition.y &&
         block.position.z === newBlockPosition.z
@@ -616,7 +653,7 @@ export function createPlayerModeController(player, camera) {
       const localPosition = player.ship.worldToLocalPosition(newBlockPosition);
       
       // Store the current number of blocks for verification
-      const initialBlockCount = player.ship.blocks.length;
+      const initialBlockCount = player.ship.blockManager.blocks.length;
       
       // Validate the position isn't already occupied
       // Check both the ship's blocks array and the scene
@@ -657,10 +694,11 @@ export function createPlayerModeController(player, camera) {
       
       if (!block) {
         console.error(`Failed to create block of type ${blockType}`);
+        state.processingBlockAction = false;
         return;
       }
       
-      console.log(`Created block of type ${blockType}`);
+      console.log(`Created block of type ${blockType} at local position:`, localPosition);
       
       // Create mesh for the block with proper textures
       if (window.resourceLoader) {
@@ -692,10 +730,12 @@ export function createPlayerModeController(player, camera) {
       }
       
       // Add block to ship's blocks array
-      player.ship.blocks.push(block);
+      player.ship.blockManager.addBlock(block, window.resourceLoader);
+      
+      console.log(`Added block to ship's blockManager. Block mesh exists: ${!!block.mesh}`);
       
       // Verify only one block was added
-      const finalBlockCount = player.ship.blocks.length;
+      const finalBlockCount = player.ship.blockManager.blocks.length;
       if (finalBlockCount !== initialBlockCount + 1) {
         console.warn(`Expected to add 1 block, but block count changed from ${initialBlockCount} to ${finalBlockCount}`);
       }
@@ -704,11 +744,8 @@ export function createPlayerModeController(player, camera) {
       if (typeof player.removeFromInventory === 'function') {
         player.removeFromInventory(selectedSlot);
       } else {
-        // Fallback inventory management
-        inventorySlot.count--;
-        if (inventorySlot.count <= 0) {
-          inventorySlot.type = null;
-        }
+        // Use the inventory's removeItem method
+        player.inventory.removeItem(selectedSlot, 1);
       }
       
       console.log(`Successfully placed ${blockType} block at position:`, localPosition);
@@ -716,6 +753,8 @@ export function createPlayerModeController(player, camera) {
       // Fix any texture issues that might have occurred
       if (typeof player.ship.fixBlockTextureIssues === 'function') {
         player.ship.fixBlockTextureIssues();
+      } else if (player.ship.renderer && typeof player.ship.renderer.fixBlockTextureIssues === 'function') {
+        player.ship.renderer.fixBlockTextureIssues();
       }
       
       // Save ship to localStorage if shipStorage is available
@@ -731,9 +770,16 @@ export function createPlayerModeController(player, camera) {
       
       // Set the blocks changed flag
       blocksChanged = true;
+      
+      console.log("Block placement completed successfully");
     } catch (error) {
       console.error('Error placing block:', error);
-      state.processingBlockAction = false; // Reset on error
+    } finally {
+      // Reset the processing flag after a short delay to prevent rapid re-clicks
+      setTimeout(() => {
+        state.processingBlockAction = false;
+        console.log("Block action processing flag reset");
+      }, 200);
     }
   }
   
@@ -785,7 +831,7 @@ export function createPlayerModeController(player, camera) {
       });
       
       // Store the current number of blocks for verification
-      const initialBlockCount = player.ship.blocks.length;
+      const initialBlockCount = player.ship.blockManager.blocks.length;
       
       // Perform raycasting only on valid block meshes
       const intersects = breakRaycaster.intersectObjects(blockMeshes, false);
@@ -850,7 +896,7 @@ export function createPlayerModeController(player, camera) {
         blocksChanged = true;
         
         // Verify only one block was removed
-        const finalBlockCount = player.ship.blocks.length;
+        const finalBlockCount = player.ship.blockManager.blocks.length;
         if (finalBlockCount !== initialBlockCount - 1) {
           console.warn(`Block count mismatch: ${initialBlockCount} -> ${finalBlockCount}`);
           // Attempt to clean up any duplicate removals
@@ -1017,7 +1063,7 @@ export function createPlayerModeController(player, camera) {
     // Check for collisions with ship blocks
     let onGround = false;
     
-    player.ship.blocks.forEach(block => {
+    player.ship.blockManager.blocks.forEach(block => {
       // Skip blocks without meshes
       if (!block.mesh) return;
       

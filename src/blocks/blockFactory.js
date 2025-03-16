@@ -10,7 +10,7 @@ import * as THREE from 'three';
 class BlockFactory {
   /**
    * Create a block of the specified type
-   * @param {String} type - The type of block to create ('lift', 'wood', 'stone', 'cannon', 'control')
+   * @param {String} type - The type of block to create ('lift', 'wood', 'stone', 'cannon', 'control', 'engine')
    * @param {Object} position - The position of the block in 3D space {x, y, z}
    * @param {Object} options - Additional options for the block
    * @returns {Object} - The created block
@@ -26,6 +26,31 @@ class BlockFactory {
       health: options.health || 100,
       rotation: options.rotation || 0,
       mesh: null,
+      
+      // For engine blocks, add direction and thrust-related properties
+      ...(normalizedType === 'engine' ? {
+        direction: options.direction || { x: 0, y: 0, z: -1 }, // Default direction (forward)
+        isActive: false,
+        thrustPower: options.thrustPower || 1,
+        
+        // Set engine active state
+        setActive(active) {
+          this.isActive = active;
+        },
+        
+        // Calculate thrust provided by this engine
+        calculateThrust() {
+          if (!this.isActive) {
+            return { x: 0, y: 0, z: 0 };
+          }
+          
+          return {
+            x: this.direction.x * this.thrustPower,
+            y: this.direction.y * this.thrustPower,
+            z: this.direction.z * this.thrustPower
+          };
+        }
+      } : {}),
       
       // Create mesh for the block
       createMesh(group, textureLoader) {
@@ -76,6 +101,38 @@ class BlockFactory {
           this.mesh.rotation.y = this.rotation;
         }
         
+        // For engine blocks, add a visual indicator of direction
+        if (this.type === 'engine' && this.direction) {
+          // Add a small cone to indicate thrust direction
+          const coneGeometry = new THREE.ConeGeometry(0.2, 0.4, 8);
+          const coneMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000 }); // Red
+          const cone = new THREE.Mesh(coneGeometry, coneMaterial);
+          
+          // Position the cone based on the engine direction
+          cone.position.set(
+            this.direction.x * 0.7,
+            this.direction.y * 0.7,
+            this.direction.z * 0.7
+          );
+          
+          // Rotate the cone to point in the direction of thrust
+          if (this.direction.z === -1) {
+            // Forward
+            cone.rotation.x = Math.PI;
+          } else if (this.direction.z === 1) {
+            // Backward
+            // No rotation needed, default cone points up
+          } else if (this.direction.x === 1) {
+            // Right
+            cone.rotation.z = -Math.PI / 2;
+          } else if (this.direction.x === -1) {
+            // Left
+            cone.rotation.z = Math.PI / 2;
+          }
+          
+          this.mesh.add(cone);
+        }
+        
         this.mesh.castShadow = true;
         this.mesh.receiveShadow = true;
         
@@ -87,15 +144,37 @@ class BlockFactory {
         
         // Add to group
         if (group) {
-          group.add(this.mesh);
-          
-          // Force update the world matrix to ensure correct positioning
-          this.mesh.updateMatrixWorld(true);
-          
-          console.log(`Added mesh for ${this.type} block to group at position:`, this.position);
+          // Check if the mesh is already in the group
+          if (this.mesh.parent !== group) {
+            // Remove from current parent if it exists
+            if (this.mesh.parent) {
+              this.mesh.parent.remove(this.mesh);
+            }
+            
+            // Add to the group
+            group.add(this.mesh);
+            
+            // Force update the world matrix to ensure correct positioning
+            this.mesh.updateMatrixWorld(true);
+            
+            console.log(`Added mesh for ${this.type} block to group at position:`, this.position);
+          } else {
+            console.log(`Mesh for ${this.type} block is already in the group`);
+          }
         } else {
           console.error("No group provided to add mesh to");
+          
+          // Try to find a scene to add the mesh to
+          if (window.renderer && window.renderer.scene) {
+            console.log("Found scene from window.renderer, adding mesh directly");
+            window.renderer.scene.add(this.mesh);
+          }
         }
+        
+        // Ensure the mesh is visible
+        this.mesh.visible = true;
+        
+        return this.mesh;
       },
       
       // Get default color for the block type
@@ -106,6 +185,7 @@ class BlockFactory {
           case 'lift': return 0xFFD700;
           case 'cannon': return 0x696969;
           case 'control': return 0x8B0000;
+          case 'engine': return 0x444444; // Dark gray for engines
           default: return 0xAAAAAA;
         }
       },

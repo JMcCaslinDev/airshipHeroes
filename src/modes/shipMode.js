@@ -174,8 +174,8 @@ export function createShipModeController(player, camera, world) {
   function fireCannons() {
     if (!active || !player.ship) return;
     
-    // Find cannon blocks
-    const cannonBlocks = player.ship.blocks.filter(block => block.type === 'cannon');
+    // Find all cannon blocks on the ship
+    const cannonBlocks = player.ship.blockManager.blocks.filter(block => block.type === 'cannon');
     
     // Fire each cannon
     cannonBlocks.forEach(cannon => {

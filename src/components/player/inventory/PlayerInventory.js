@@ -121,18 +121,21 @@ class PlayerInventory {
 
   /**
    * Remove an item from the inventory
-   * @param {Number} slotIndex - The index of the slot to remove from
-   * @param {Number} count - The number of items to remove
-   * @returns {Boolean} - Whether the items were successfully removed
+   * @param {number} slotIndex - The index of the slot to remove from
+   * @param {number} count - The number of items to remove
+   * @returns {Boolean} - Whether the item was successfully removed
    */
   removeItem(slotIndex, count = 1) {
     if (slotIndex >= 0 && slotIndex < this.slots.length) {
       const slot = this.slots[slotIndex];
       
       if (slot) {
-        // If infinite blocks is enabled, don't actually reduce the count
-        if (!this.infiniteBlocks) {
-          // Remove items
+        // If infinite blocks is enabled, don't let count go below 1
+        if (this.infiniteBlocks) {
+          // Just for visual feedback, reduce the count but keep at least 1
+          slot.count = Math.max(1, slot.count - count);
+        } else {
+          // Normal behavior - actually reduce the count
           slot.count -= count;
           
           // Remove slot if empty

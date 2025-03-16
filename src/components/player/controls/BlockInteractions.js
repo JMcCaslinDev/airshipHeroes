@@ -39,7 +39,7 @@ class BlockInteractions {
     raycaster.far = this.maxPlaceDistance;
     
     // Check for intersection with the ship
-    if (this.player.ship && this.player.ship.blocks.length > 0) {
+    if (this.player.ship && this.player.ship.blockManager && this.player.ship.blockManager.blocks.length > 0) {
       // Get all block meshes from the ship
       const blockMeshes = this.getBlockMeshes();
       
@@ -50,24 +50,21 @@ class BlockInteractions {
         // Get the first intersection
         const intersection = intersects[0];
         
-        // Check if the intersection is within the maximum distance
-        if (intersection.distance <= this.maxPlaceDistance) {
-          this.handleBlockBreaking(intersection);
-        } else {
-          console.log(`Block too far to break (${intersection.distance} > ${this.maxPlaceDistance})`);
-        }
-      } else {
-        console.log("No block found to break");
+        // Handle block breaking
+        this.handleBlockBreaking(intersection);
+        
+        // Validate ship blocks after breaking
+        this.player.validateShipBlocks();
+        
+        // Save ship to storage
+        this.saveShipToStorage();
+        
+        return true;
       }
-    } else {
-      console.log("No ship or blocks available to break");
     }
     
-    // Validate ship blocks after breaking
-    this.player.validateShipBlocks();
-    
-    // Clean up the ship to remove any ghost blocks
-    this.player.cleanupShip();
+    console.log("No block found to break");
+    return false;
   }
 
   /**
@@ -82,52 +79,37 @@ class BlockInteractions {
       return;
     }
     
-    // Check if we have a selected block
-    if (!this.player.selectedBlock) {
-      // Try to select a block from the current slot
-      this.player.selectedBlock = this.player.inventory.getSelectedBlock();
-      
-      // Still no block selected? Try to find a non-empty slot
-      if (!this.player.selectedBlock) {
-        for (let i = 0; i < this.player.inventory.slots.length; i++) {
-          if (this.player.inventory.slots[i]) {
-            this.player.inventory.selectSlot(i);
-            this.player.selectedBlock = this.player.inventory.getSelectedBlock();
-            this.player.ui.updateInventory();
-            break;
-          }
-        }
-      }
-      
-      // Still no block selected? Can't place anything
-      if (!this.player.selectedBlock) {
-        console.log("No blocks in inventory to place");
-        return;
-      }
-    }
-    
-    console.log(`Placing block of type: ${this.player.selectedBlock.type}`);
-    
     const { eyePosition, lookDirection } = this.getEyePositionAndDirection();
     
-    // Cast ray to find placement position
+    // Cast ray to find where to place the block
     const raycaster = new THREE.Raycaster(eyePosition, lookDirection);
     raycaster.far = this.maxPlaceDistance;
     
-    // Check for intersection with the ship
-    if (this.player.ship && this.player.ship.blocks.length > 0) {
-      this.handleBlockPlacementWithExistingShip(raycaster, eyePosition, lookDirection);
-    } else if (this.player.ship) {
-      this.handleFirstBlockPlacement(eyePosition, lookDirection);
+    // Check if the ship exists and has blocks
+    if (this.player.ship && this.player.ship.blockManager && this.player.ship.blockManager.blocks.length > 0) {
+      // Try to place block adjacent to existing ship
+      const placed = this.handleBlockPlacementWithExistingShip(raycaster, eyePosition, lookDirection);
+      
+      if (placed) {
+        // Validate ship blocks after placing
+        this.player.validateShipBlocks();
+        
+        // Save ship to storage
+        this.saveShipToStorage();
+        
+        return true;
+      }
     } else {
-      console.log("No ship available to place blocks on");
+      // Handle first block placement (creating a new ship)
+      const placed = this.handleFirstBlockPlacement(eyePosition, lookDirection);
+      
+      if (placed) {
+        return true;
+      }
     }
     
-    // Validate ship blocks after placing
-    this.player.validateShipBlocks();
-    
-    // Clean up the ship to remove any ghost blocks
-    this.player.cleanupShip();
+    console.log("Could not place block");
+    return false;
   }
 
   /**
@@ -157,18 +139,17 @@ class BlockInteractions {
 
   /**
    * Get all block meshes from the ship
-   * @returns {Array} - Array of block meshes
+   * @returns {Array} Array of THREE.Mesh objects
    */
   getBlockMeshes() {
-    const blockMeshes = [];
+    if (!this.player.ship || !this.player.ship.blockManager) {
+      return [];
+    }
     
-    this.player.ship.group.traverse(child => {
-      if (child.isMesh && child.userData.isBlock) {
-        blockMeshes.push(child);
-      }
-    });
-    
-    return blockMeshes;
+    // Filter out blocks without meshes
+    return this.player.ship.blockManager.blocks
+      .filter(block => block.mesh)
+      .map(block => block.mesh);
   }
 
   /**
@@ -279,75 +260,77 @@ class BlockInteractions {
 
   /**
    * Place a block adjacent to an existing block
-   * @param {Object} intersection - The intersection data
+   * @param {Object} intersection - The intersection data from raycasting
+   * @returns {Boolean} Whether the block was placed successfully
    */
   placeBlockAdjacentToExisting(intersection) {
-    try {
-      // Get the block that was hit
-      const hitBlockData = intersection.object.userData.block;
-      
-      if (!hitBlockData) {
-        console.warn("No block data found in the hit object's userData");
-        return;
-      }
-      
-      // Get the face normal in local space
-      const faceNormal = intersection.face.normal.clone();
-      
-      // Transform the normal to world space
-      const normalMatrix = new THREE.Matrix3().getNormalMatrix(intersection.object.matrixWorld);
-      const worldNormal = faceNormal.clone().applyMatrix3(normalMatrix).normalize();
-      
-      // Convert world normal to ship space by applying inverse ship rotation
-      const shipRotationY = this.player.ship.rotation;
-      const rotationMatrix = new THREE.Matrix4().makeRotationY(-shipRotationY);
-      const shipSpaceNormal = worldNormal.clone().applyMatrix4(rotationMatrix);
-      
-      // Find the dominant axis
-      const absX = Math.abs(shipSpaceNormal.x);
-      const absY = Math.abs(shipSpaceNormal.y);
-      const absZ = Math.abs(shipSpaceNormal.z);
-      
-      // Calculate direction vector
-      let direction = { x: 0, y: 0, z: 0 };
-      
-      if (absX >= absY && absX >= absZ) {
-        direction.x = Math.sign(shipSpaceNormal.x);
-      } else if (absY >= absX && absY >= absZ) {
-        direction.y = Math.sign(shipSpaceNormal.y);
-      } else {
-        direction.z = Math.sign(shipSpaceNormal.z);
-      }
-      
-      // Calculate the grid position for the new block
-      const newBlockGridPos = {
-        x: hitBlockData.position.x + direction.x,
-        y: hitBlockData.position.y + direction.y,
-        z: hitBlockData.position.z + direction.z
-      };
-      
-      // Check if there's already a block at this position
-      const existingBlock = this.player.ship.getBlockAtLocalPosition(newBlockGridPos);
-      
-      if (existingBlock) {
-        console.log("Block already exists at this position");
-        return;
-      }
-      
-      // Check for orphaned meshes at this position and clean them up
-      this.cleanupOrphanedMeshesAtPosition(newBlockGridPos);
-      
-      // Remove from inventory
-      const removed = this.player.inventory.removeItem(this.player.inventory.selectedSlot);
-      
-      if (removed) {
-        this.createAndAddBlock(newBlockGridPos);
-      } else {
-        console.error("Failed to remove block from inventory");
-      }
-    } catch (error) {
-      console.error("Error calculating block placement:", error);
+    // Get the block that was hit
+    const hitObject = intersection.object;
+    
+    // Find the corresponding block data
+    const hitBlock = this.player.ship.blockManager.blocks.find(block => 
+      block.mesh === hitObject
+    );
+    
+    if (!hitBlock) {
+      console.warn("Could not find block data for hit object");
+      return false;
     }
+    
+    // Get the normal directly from the intersection
+    const normal = intersection.face.normal.clone();
+    
+    console.log("Original face normal:", normal);
+    
+    // The normal is in local space of the block mesh
+    // We need to transform it to world space, then to ship-local space
+    
+    // First, transform to world space
+    const worldNormal = normal.clone().transformDirection(hitObject.matrixWorld);
+    console.log("World normal:", worldNormal);
+    
+    // Then transform to ship-local space
+    const shipLocalNormal = this.player.ship.transform.worldToLocalDirection({
+      x: worldNormal.x,
+      y: worldNormal.y,
+      z: worldNormal.z
+    });
+    
+    console.log("Ship-local normal:", shipLocalNormal);
+    
+    // Round the normal to get a grid direction
+    const direction = {
+      x: Math.round(shipLocalNormal.x),
+      y: Math.round(shipLocalNormal.y),
+      z: Math.round(shipLocalNormal.z)
+    };
+    
+    console.log("Grid direction:", direction);
+    
+    // Calculate the position for the new block in ship-local coordinates
+    const newBlockPosition = {
+      x: hitBlock.position.x + direction.x,
+      y: hitBlock.position.y + direction.y,
+      z: hitBlock.position.z + direction.z
+    };
+    
+    console.log("Hit block position:", hitBlock.position);
+    console.log("New block position (ship-local):", newBlockPosition);
+    
+    // Validate the position is not occupied
+    const existingBlock = this.player.ship.blockManager.blocks.find(block => 
+      block.position.x === newBlockPosition.x &&
+      block.position.y === newBlockPosition.y &&
+      block.position.z === newBlockPosition.z
+    );
+    
+    if (existingBlock) {
+      console.log("Cannot place block: position already occupied");
+      return false;
+    }
+    
+    // Create and add the block
+    return this.createAndAddBlock(newBlockPosition);
   }
 
   /**
@@ -361,28 +344,33 @@ class BlockInteractions {
       lookDirection.clone().multiplyScalar(Math.min(3, this.maxPlaceDistance))
     );
     
-    // Round to grid position
+    // Round to grid position in world coordinates
     placementPos.x = Math.round(placementPos.x);
     placementPos.y = Math.round(placementPos.y);
     placementPos.z = Math.round(placementPos.z);
     
-    // Convert to grid position relative to ship
-    const gridPos = {
-      x: Math.round(placementPos.x - this.player.ship.position.x),
-      y: Math.round(placementPos.y - this.player.ship.position.y),
-      z: Math.round(placementPos.z - this.player.ship.position.z)
-    };
+    console.log("World placement position:", placementPos);
+    
+    // Convert world position to ship-local coordinates
+    const gridPos = this.player.ship.worldToLocalPosition({
+      x: placementPos.x,
+      y: placementPos.y,
+      z: placementPos.z
+    });
+    
+    // Round to ensure we're on the grid
+    gridPos.x = Math.round(gridPos.x);
+    gridPos.y = Math.round(gridPos.y);
+    gridPos.z = Math.round(gridPos.z);
+    
+    console.log("Ship-local grid position:", gridPos);
     
     // Check if position is within placement range
-    const distance = eyePosition.distanceTo(new THREE.Vector3(
-      gridPos.x + this.player.ship.position.x,
-      gridPos.y + this.player.ship.position.y,
-      gridPos.z + this.player.ship.position.z
-    ));
+    const distance = eyePosition.distanceTo(placementPos);
     
     if (distance <= this.maxPlaceDistance) {
       // Check if there's already a block at this position
-      const existingBlock = this.player.ship.blocks.find(block => 
+      const existingBlock = this.player.ship.blockManager.blocks.find(block => 
         block.position.x === gridPos.x &&
         block.position.y === gridPos.y &&
         block.position.z === gridPos.z
@@ -416,17 +404,26 @@ class BlockInteractions {
       lookDirection.clone().multiplyScalar(2) // Place 2 units in front of player
     );
     
-    // Round to grid position
+    // Round to grid position in world coordinates
     placementPos.x = Math.round(placementPos.x);
     placementPos.y = Math.round(placementPos.y);
     placementPos.z = Math.round(placementPos.z);
     
-    // Convert to grid position relative to ship
-    const gridPos = {
-      x: Math.round(placementPos.x - this.player.ship.position.x),
-      y: Math.round(placementPos.y - this.player.ship.position.y),
-      z: Math.round(placementPos.z - this.player.ship.position.z)
-    };
+    console.log("World placement position for first block:", placementPos);
+    
+    // Convert world position to ship-local coordinates
+    const gridPos = this.player.ship.worldToLocalPosition({
+      x: placementPos.x,
+      y: placementPos.y,
+      z: placementPos.z
+    });
+    
+    // Round to ensure we're on the grid
+    gridPos.x = Math.round(gridPos.x);
+    gridPos.y = Math.round(gridPos.y);
+    gridPos.z = Math.round(gridPos.z);
+    
+    console.log("Ship-local grid position for first block:", gridPos);
     
     // Remove from inventory
     const removed = this.player.inventory.removeItem(this.player.inventory.selectedSlot);
@@ -439,56 +436,75 @@ class BlockInteractions {
   }
 
   /**
-   * Create and add a block to the ship
+   * Create a new block and add it to the ship
    * @param {Object} gridPos - The grid position for the new block
+   * @returns {Boolean} Whether the block was created and added successfully
    */
   createAndAddBlock(gridPos) {
-    // Use BlockFactory to create the new block
-    const newBlock = BlockFactory.createBlock(
-      this.player.selectedBlock.type,
-      { ...gridPos },
-      { rotation: 0 }
-    );
+    console.log("createAndAddBlock called with position:", gridPos);
     
-    if (!newBlock) {
-      console.error("Failed to create new block using BlockFactory");
-      // Add the item back to inventory since creation failed
-      this.player.inventory.addItem({ type: this.player.selectedBlock.type });
-      return;
+    try {
+      // Check if we have a selected block
+      if (!this.player.selectedBlock) {
+        // Try to select a block from the current slot
+        this.player.selectedBlock = this.player.inventory.getSelectedBlock();
+        
+        console.log("Selected block from inventory:", this.player.selectedBlock);
+        
+        if (!this.player.selectedBlock) {
+          console.log("No block selected to place");
+          return false;
+        }
+      }
+      
+      // Get the block type from the selected block
+      const blockType = this.player.selectedBlock.type;
+      console.log("Creating block of type:", blockType);
+      
+      // Create a new block
+      const newBlock = BlockFactory.createBlock(blockType, gridPos);
+      
+      if (!newBlock) {
+        console.error(`Failed to create block of type ${blockType}`);
+        return false;
+      }
+      
+      console.log("Block created:", newBlock);
+      
+      // Remove from inventory
+      const removed = this.player.inventory.removeItem(this.player.inventory.selectedSlot);
+      
+      if (!removed) {
+        console.error("Failed to remove block from inventory");
+        return false;
+      }
+      
+      console.log("Block removed from inventory");
+      
+      // Add the block to the ship
+      const addedBlock = this.player.ship.blockManager.addBlock(newBlock, window.resourceLoader || this.createFallbackResourceLoader());
+      
+      console.log("Block added to ship:", addedBlock);
+      console.log("Ship now has", this.player.ship.blockManager.blocks.length, "blocks");
+      
+      // Check if the block has a mesh
+      if (newBlock.mesh) {
+        console.log("Block has a mesh");
+      } else {
+        console.warn("Block does not have a mesh after adding to ship");
+      }
+      
+      // Update UI
+      this.player.ui.updateInventory();
+      
+      // Save ship to storage
+      this.saveShipToStorage();
+      
+      return true;
+    } catch (error) {
+      console.error("Error creating and adding block:", error);
+      return false;
     }
-    
-    // Get the resource loader
-    let resourceLoader = window.resourceLoader;
-    
-    // If window.resourceLoader is not available, use a simple fallback
-    if (!resourceLoader) {
-      resourceLoader = this.createFallbackResourceLoader();
-    }
-    
-    // Create the mesh before adding to the ship
-    newBlock.createMesh(this.player.ship.group, resourceLoader);
-    
-    // Add to ship's blocks array
-    this.player.ship.blocks.push(newBlock);
-    
-    // Force update the ship's group to ensure the new block is visible
-    this.player.ship.group.updateMatrixWorld(true);
-    
-    // Explicitly update the block mesh position to ensure it's correct
-    newBlock.mesh.position.set(
-      newBlock.position.x,
-      newBlock.position.y,
-      newBlock.position.z
-    );
-    
-    // Ensure the mesh has the correct userData
-    newBlock.mesh.userData.block = newBlock;
-    newBlock.mesh.userData.isBlock = true;
-    newBlock.mesh.userData.type = newBlock.type;
-    newBlock.mesh.userData.gridPosition = { ...newBlock.position };
-    
-    // Save ship to localStorage
-    this.saveShipToStorage();
   }
 
   /**

@@ -101,6 +101,15 @@ class Player {
         this.character.position = { ...wheelPos };
         this.character.position.y += 1; // Stand on top of the steering wheel
         this.character.updateMeshPosition();
+      } else {
+        // Fallback if no steering wheel is found
+        console.warn("No steering wheel found, positioning character at ship center");
+        this.character.position = { 
+          x: this.ship.position.x, 
+          y: this.ship.position.y + 2, // Position above the ship
+          z: this.ship.position.z 
+        };
+        this.character.updateMeshPosition();
       }
       
       // Show player character

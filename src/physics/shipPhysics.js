@@ -23,10 +23,10 @@ export function updateShipPhysics(ship, worldManager, deltaTime) {
   if (!ship) return;
   
   // Calculate lift ratio
-  const totalBlocks = ship.blocks.length;
+  const totalBlocks = ship.blockManager.blocks.length;
   if (totalBlocks === 0) return;
   
-  const liftBlocks = ship.blocks.filter(block => block.type === 'lift').length;
+  const liftBlocks = ship.blockManager.blocks.filter(block => block.type === 'lift').length;
   const liftRatio = liftBlocks / totalBlocks;
   
   // Ships are neutrally buoyant by default
@@ -173,15 +173,25 @@ export function updateRotation(ship, deltaTime) {
  */
 export function checkCollisions(ship, worldManager) {
   // Simple collision check with the ground
-  const lowestBlock = ship.blocks.reduce((lowest, block) => {
-    const worldY = ship.position.y + block.position.y;
-    return worldY < lowest ? worldY : lowest;
-  }, Infinity);
+  if (!ship.blockManager || ship.blockManager.blocks.length === 0) {
+    return false;
+  }
+  
+  const lowestBlock = ship.blockManager.blocks.reduce((lowest, block) => {
+    if (block.position.y < lowest.position.y) {
+      return block;
+    }
+    return lowest;
+  }, ship.blockManager.blocks[0]);
+  
+  if (!lowestBlock) return false;
+  
+  const lowestY = ship.position.y + lowestBlock.position.y;
   
   // Check if the lowest block is below the ground
-  if (lowestBlock < 1) {
+  if (lowestY < 1) {
     // Move the ship up so it's not colliding
-    ship.position.y -= lowestBlock;
+    ship.position.y += (1 - lowestY);
     
     // Update group position
     if (ship.group) {

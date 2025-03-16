@@ -174,7 +174,7 @@ class PlayerCharacter {
    * @param {Object} ship - The ship instance
    */
   handleCollisions(previousPosition, newPosition, ship) {
-    if (!ship || ship.blocks.length === 0) {
+    if (!ship || !ship.blockManager || ship.blockManager.blocks.length === 0) {
       // No ship or blocks to collide with
       this.position = newPosition;
       return;
@@ -204,7 +204,7 @@ class PlayerCharacter {
     // Check for collisions with blocks
     let collisionDetected = false;
     
-    for (const block of ship.blocks) {
+    for (const block of ship.blockManager.blocks) {
       // Skip blocks without meshes
       if (!block.mesh) continue;
       
@@ -299,7 +299,7 @@ class PlayerCharacter {
     );
     
     // Check for collisions with blocks
-    for (const block of ship.blocks) {
+    for (const block of ship.blockManager.blocks) {
       if (!block.mesh) continue;
       
       const blockBox = block.getCollisionBox(ship);
@@ -382,7 +382,7 @@ class PlayerCharacter {
     let highestBlockY = -Infinity;
     let isStanding = false;
     
-    for (const block of ship.blocks) {
+    for (const block of ship.blockManager.blocks) {
       if (!block.mesh) continue;
       
       const blockBox = block.getCollisionBox(ship);
@@ -431,7 +431,7 @@ class PlayerCharacter {
     let highestBlockY = -Infinity;
     let foundBlock = false;
     
-    for (const block of ship.blocks) {
+    for (const block of ship.blockManager.blocks) {
       if (!block.mesh) continue;
       
       const blockBox = block.getCollisionBox(ship);

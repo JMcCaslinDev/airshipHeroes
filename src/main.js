@@ -25,6 +25,8 @@ import BlockFactory from './blocks/blockFactory.js';
 
 // Create game objects
 const renderer = createRenderer();
+// Make renderer accessible globally
+window.renderer = renderer;
 const gameState = createGameState();
 // Make game state accessible globally for mode checking
 window.gameState = gameState;
@@ -266,8 +268,8 @@ function startGame(username) {
         if (savedShip && savedShip.blocks && Array.isArray(savedShip.blocks) && savedShip.blocks.length > 0) {
           console.log(`Loaded saved ship for user: ${username} with ${savedShip.blocks.length} blocks`);
           const ship = loadShipForPlayer(localPlayer, savedShip);
-          if (ship && ship.blocks && ship.blocks.length > 0) {
-            console.log(`Ship loaded successfully with ${ship.blocks.length} blocks`);
+          if (ship && ship.blockManager.blocks && ship.blockManager.blocks.length > 0) {
+            console.log(`Ship loaded successfully with ${ship.blockManager.blocks.length} blocks`);
             shipLoaded = true;
           } else {
             console.error('Ship loaded but has no blocks, falling back to default ship');
@@ -422,39 +424,14 @@ function ensureShipInScene(ship) {
     return;
   }
   
-  // Check if the ship group is already in the scene
-  let isInScene = false;
-  renderer.scene.traverse(object => {
-    if (object === ship.group) {
-      isInScene = true;
-    }
-  });
+  console.log('Ensuring ship is in scene and visible');
   
-  if (!isInScene) {
-    console.log('Adding ship group to scene');
-    renderer.scene.add(ship.group);
-  }
-  
-  // Ensure the ship group is visible
-  ship.group.visible = true;
-  
-  // Force position update
-  if (ship.position) {
-    ship.group.position.set(
-      ship.position.x || 0, 
-      ship.position.y || 50, 
-      ship.position.z || 0
-    );
+  // Use the ship's ensureVisible method
+  if (renderer && renderer.scene) {
+    ship.ensureVisible(renderer.scene);
   } else {
-    console.warn('Ship position is null, setting default position');
-    ship.position = { x: 0, y: 50, z: 0 };
-    ship.group.position.set(0, 50, 0);
+    console.error('Cannot ensure ship visibility: renderer or scene is null');
   }
-  
-  ship.group.rotation.y = ship.rotation || 0;
-  
-  // Force update of the world matrix
-  ship.group.updateMatrixWorld(true);
   
   console.log(`Ship position: ${JSON.stringify(ship.position)}`);
   console.log(`Ship group position: ${JSON.stringify({
@@ -473,7 +450,7 @@ function ensureShipInScene(ship) {
 }
 
 /**
- * Load a saved ship for a player
+ * Load a ship for a player from a ship definition
  * @param {Object} player - The player to load the ship for
  * @param {Object} shipDefinition - The ship definition to load
  * @returns {Object} The loaded ship
@@ -503,15 +480,15 @@ function loadShipForPlayer(player, shipDefinition) {
     });
     
     // Load the ship from the definition
-    ship.loadFromDefinition(shipDefinition, renderer.scene, resourceLoader);
+    ship.loadFromDefinition(shipDefinition);
     
     // Verify the ship has blocks
-    if (!ship.blocks || ship.blocks.length === 0) {
+    if (!ship.blockManager.blocks || ship.blockManager.blocks.length === 0) {
       console.error('Ship loaded but has no blocks');
       return null;
     }
     
-    console.log(`Ship loaded with ${ship.blocks.length} blocks`);
+    console.log(`Ship loaded with ${ship.blockManager.blocks.length} blocks`);
     
     // Ensure the ship is visible and in the scene
     ensureShipInScene(ship);
@@ -617,9 +594,8 @@ function addDebugHelpers(ship) {
 }
 
 /**
- * Create a fallback ship for a player when other methods fail
- * @param {Object} player - The player to create a ship for
- * @returns {Object} The created ship
+ * Create a fallback ship for a player when no other ship is available
+ * @param {Object} player - The player to create the ship for
  */
 function createFallbackShip(player) {
   console.log('Creating fallback ship');
@@ -637,7 +613,14 @@ function createFallbackShip(player) {
       name: 'Fallback Ship'
     });
     
-    // Create a simple ship with a control block and some lift blocks
+    // Make sure the ship group is added to the scene
+    if (renderer && renderer.scene) {
+      ship.ensureVisible(renderer.scene);
+    } else {
+      console.error('Cannot add ship group to scene: renderer or scene is null');
+    }
+    
+    // Create a simple ship with a control block, lift blocks, and engine blocks
     const blocks = [
       // Control block at the center
       { type: 'control', position: { x: 0, y: 0, z: 0 } },
@@ -647,6 +630,12 @@ function createFallbackShip(player) {
       { type: 'lift', position: { x: -1, y: 0, z: 0 } },
       { type: 'lift', position: { x: 0, y: 0, z: 1 } },
       { type: 'lift', position: { x: 0, y: 0, z: -1 } },
+      
+      // Engine blocks for movement
+      { type: 'engine', position: { x: 2, y: 0, z: 0 }, direction: { x: 1, y: 0, z: 0 } },  // Right engine
+      { type: 'engine', position: { x: -2, y: 0, z: 0 }, direction: { x: -1, y: 0, z: 0 } }, // Left engine
+      { type: 'engine', position: { x: 0, y: 0, z: 2 }, direction: { x: 0, y: 0, z: 1 } },  // Back engine
+      { type: 'engine', position: { x: 0, y: 0, z: -2 }, direction: { x: 0, y: 0, z: -1 } }, // Front engine
       
       // Wood blocks for structure
       { type: 'wood', position: { x: 1, y: 0, z: 1 } },
@@ -658,19 +647,28 @@ function createFallbackShip(player) {
     // Create blocks and add to ship
     for (const blockData of blocks) {
       try {
+        // Create the block with direction if it's an engine
         const block = BlockFactory.createBlock(
           blockData.type, 
-          blockData.position
+          blockData.position,
+          blockData.direction ? { direction: blockData.direction } : undefined
         );
         
         if (block) {
-          // Add the block to the ship
-          ship.blocks.push(block);
+          // Add the block to the ship using the blockManager
+          ship.blockManager.addBlock(block, resourceLoader);
           
-          // Create mesh for the block
-          block.createMesh(ship.group, resourceLoader);
+          // If it's a steering wheel or control block, store a reference
+          if (blockData.type === 'control' || blockData.type === 'steeringWheel') {
+            ship.steeringWheel = block;
+          }
           
-          console.log(`Added ${blockData.type} block to fallback ship`);
+          // Verify the block has a mesh
+          if (!block.mesh) {
+            console.error(`Block of type ${blockData.type} has no mesh after adding to ship`);
+          } else {
+            console.log(`Added ${blockData.type} block to fallback ship with mesh`);
+          }
         }
       } catch (blockError) {
         console.error(`Error creating ${blockData.type} block:`, blockError);
@@ -678,18 +676,21 @@ function createFallbackShip(player) {
     }
     
     // Check if we successfully created any blocks
-    if (ship.blocks.length === 0) {
+    if (ship.blockManager.blocks.length === 0) {
       console.error('Failed to create any blocks for fallback ship');
       return null;
     }
     
-    console.log(`Created fallback ship with ${ship.blocks.length} blocks`);
+    console.log(`Created fallback ship with ${ship.blockManager.blocks.length} blocks`);
     
-    // Ensure the ship is visible and in the scene
-    ensureShipInScene(ship);
+    // Force update the ship's renderer
+    ship.renderer.updateBlockMeshes();
     
     // Set the ship for the player
     player.ship = ship;
+    
+    // Ensure the ship is visible and in the scene again after adding blocks
+    ship.ensureVisible(renderer.scene);
     
     // Add debug helpers
     addDebugHelpers(ship);
@@ -839,7 +840,7 @@ function handleProjectileExplode(position, damage) {
   // Apply damage to nearby blocks
   for (const player of Object.values(gameState.players)) {
     if (player.ship) {
-      applyExplosionDamage(explosion, player.ship.blocks);
+      applyExplosionDamage(explosion, player.ship.blockManager.blocks);
     }
   }
 }
@@ -1063,10 +1064,10 @@ function render() {
       if (gameState.localPlayer && gameState.localPlayer.ship) {
         console.log('Ship position during render:', gameState.localPlayer.ship.position);
         console.log('Ship group visible:', gameState.localPlayer.ship.group.visible);
-        console.log('Ship blocks count:', gameState.localPlayer.ship.blocks.length);
+        console.log('Ship blocks count:', gameState.localPlayer.ship.blockManager.blocks.length);
         
         // Log the first few blocks
-        const blocksToLog = gameState.localPlayer.ship.blocks.slice(0, 3);
+        const blocksToLog = gameState.localPlayer.ship.blockManager.blocks.slice(0, 3);
         console.log('Sample blocks:', blocksToLog.map(block => ({
           type: block.type,
           position: block.position,

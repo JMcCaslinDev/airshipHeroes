@@ -453,7 +453,7 @@ export function createUIManager(gameState, loginCallback) {
     
     // Update total blocks
     if (shipTotalBlocks) {
-      shipTotalBlocks.textContent = ship.blocks.length;
+      shipTotalBlocks.textContent = ship.blockManager.blocks.length;
     }
     
     // Update block type stats
@@ -462,12 +462,12 @@ export function createUIManager(gameState, loginCallback) {
       removeAllChildren(blockTypeStats);
       
       // Count blocks by type
-      const blockCounts = {};
-      let totalBlocks = ship.blocks.length;
+      let totalBlocks = ship.blockManager.blocks.length;
+      let blockCounts = {};
       
       if (totalBlocks === 0) return;
       
-      ship.blocks.forEach(block => {
+      ship.blockManager.blocks.forEach(block => {
         if (!blockCounts[block.type]) {
           blockCounts[block.type] = 0;
         }
@@ -523,8 +523,8 @@ export function createUIManager(gameState, loginCallback) {
         barRow.appendChild(barContainer);
         
         // Add elements to the block type stats
+        blockTypeStat.appendChild(barRow);
         blockTypeStats.appendChild(blockTypeStat);
-        blockTypeStats.appendChild(barRow);
       });
     }
   }
