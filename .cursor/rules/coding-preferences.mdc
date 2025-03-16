@@ -1,0 +1,11 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+
+# My coding preferences
+
+- Refactor files if they become larger than 200-300 lines long
+- Functions should only do one thing keep functions short and single focused.
+- Check for duplicate code when generating fixes / new features. 

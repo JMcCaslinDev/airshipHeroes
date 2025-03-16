@@ -66,7 +66,9 @@ export function createMultiplayerClient(options = {}) {
           reconnectionAttempts: 5,
           reconnectionDelay: 1000,
           timeout: 10000,
-          forceNew: true
+          forceNew: true,
+          // Add debug option to help troubleshoot connection issues
+          debug: true
         });
         
         console.log('Socket.IO client created');
@@ -84,13 +86,26 @@ export function createMultiplayerClient(options = {}) {
         this.socket.on('shipUpdate', this.handleShipUpdate.bind(this));
         this.socket.on('connect_error', this.handleConnectionError.bind(this));
         
+        // Add additional error handlers
+        this.socket.on('error', (error) => {
+          console.error('Socket error:', error);
+        });
+        
+        this.socket.on('reconnect_attempt', (attemptNumber) => {
+          console.log(`Attempting to reconnect (${attemptNumber})...`);
+        });
+        
+        this.socket.on('reconnect_failed', () => {
+          console.error('Failed to reconnect after multiple attempts');
+        });
+        
         console.log('Event handlers set up');
       } catch (error) {
         console.error('Error connecting to server:', error);
         
         // Call disconnect callback
         if (this.onDisconnect) {
-          this.onDisconnect();
+          this.onDisconnect(error);
         }
       }
     },
@@ -271,6 +286,25 @@ export function createMultiplayerClient(options = {}) {
      */
     handleConnectionError(error) {
       console.error('Connection error:', error);
+      
+      // Log more detailed error information
+      if (error && error.message) {
+        console.error('Error message:', error.message);
+      }
+      
+      if (error && error.type) {
+        console.error('Error type:', error.type);
+      }
+      
+      // Check if it's a CORS issue
+      if (error && error.message && error.message.includes('CORS')) {
+        console.error('CORS error detected. Check server CORS configuration.');
+      }
+      
+      // Check if it's a proxy error
+      if (error && error.message && error.message.includes('proxy')) {
+        console.error('Proxy error detected. Check Vite proxy configuration in vite.config.js.');
+      }
       
       // Call disconnect callback
       if (this.onDisconnect) {
