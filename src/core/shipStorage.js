@@ -5,6 +5,8 @@
  * Each user gets SHIP_SLOT_COUNT build slots.
  */
 
+import { computeShipPerformance } from '../physics/shipPerformance.js';
+
 export const SHIP_SLOT_COUNT = 5;
 
 function slotKey(username, slot) {
@@ -151,11 +153,14 @@ export function createShipStorage() {
 
       for (let i = 0; i < SHIP_SLOT_COUNT; i++) {
         const def = this.loadShip(username, i);
+        const blocks = def?.blocks ?? [];
         slots.push({
           slot: i,
           empty: !def,
           name: def?.name || `Slot ${i + 1}`,
-          blockCount: def?.blocks?.length || 0
+          blockCount: blocks.length,
+          blocks,
+          performance: def ? computeShipPerformance(blocks) : null
         });
       }
 

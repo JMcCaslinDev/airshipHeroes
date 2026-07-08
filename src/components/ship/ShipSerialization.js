@@ -5,6 +5,7 @@
  */
 
 import BlockFactory from '../../blocks/blockFactory.js';
+import { syncControlBlocks } from '../../blocks/controlBlockRules.js';
 
 class ShipSerialization {
   /**
@@ -59,16 +60,13 @@ class ShipSerialization {
     for (const block of blocks) {
       try {
         this.ship.blockManager.addBlock(block, textureLoader);
-
-        if (block.type === 'steeringWheel' || block.type === 'control') {
-          this.ship.steeringWheel = block;
-        }
-
         console.log(`Added ${block.type} block to ship`);
       } catch (error) {
         console.error(`Error adding block: ${error.message}`);
       }
     }
+
+    syncControlBlocks(this.ship);
 
     // Hide the debug placeholder once real blocks are loaded
     if (this.ship.debugMesh && this.ship.blockManager.blocks.length > 0) {

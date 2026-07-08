@@ -20,8 +20,9 @@ export function getShipLocalBlockBoxes(ship) {
     return [];
   }
   const seen = new Set();
+  // ponytail: collide against all solid blocks even if mesh not parented yet
   return ship.blockManager.blocks
-    .filter((block) => block.mesh?.parent)
+    .filter((block) => block.type !== 'redstone')
     .filter((block) => {
       const { x, y, z } = block.position;
       const key = `${x},${y},${z}`;

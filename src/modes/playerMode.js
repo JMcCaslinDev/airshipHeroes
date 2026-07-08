@@ -23,6 +23,7 @@ import {
   localFeetToWorld,
   getControlBlockFeetWorld
 } from '../physics/shipLocalCollision.js';
+import { shouldDetachFromDeck, inheritShipExitVelocity } from '../physics/shipRide.js';
 
 import {
   computeThirdPersonCamera,
@@ -51,6 +52,10 @@ export function createPlayerModeController(player, camera) {
     cameraView: 'first',
     cameraToggleLatch: false,
     defaultFov: 75,
+    /** Ship-local feet while riding the deck (0 relative speed). */
+    shipLocalFeet: null,
+    /** True while standing/walking on ship blocks — false after falling off. */
+    ridingShip: true,
     
     // Mouse button states to prevent multiple actions per click
     leftMouseDown: false,
@@ -95,6 +100,7 @@ export function createPlayerModeController(player, camera) {
     }
     
     // Position character on control block (ship-local grid → world)
+    state.ridingShip = true;
     if (player.ship) {
       const feetWorld = getControlBlockFeetWorld(player.ship);
       if (feetWorld) {
@@ -102,16 +108,19 @@ export function createPlayerModeController(player, camera) {
         player.character.position.y = feetWorld.y;
         player.character.position.z = feetWorld.z;
         state.motionY = 0;
+        player.character.velocity.x = 0;
+        player.character.velocity.z = 0;
+        const local = player.ship.transform.worldToLocalPosition(feetWorld);
+        state.shipLocalFeet = { x: local.x, y: local.y, z: local.z };
 
         if (player.character.mesh) {
           player.character.mesh.position.set(feetWorld.x, feetWorld.y, feetWorld.z);
         }
-        console.log('Positioned player on control block:', player.character.position);
       } else {
-        console.warn('No control block found on ship, using default position');
         player.character.position.x = player.ship.position.x;
         player.character.position.y = player.ship.position.y + 1.0;
         player.character.position.z = player.ship.position.z;
+        state.shipLocalFeet = { x: 0, y: 1, z: 0 };
         if (player.character.mesh) {
           player.character.mesh.position.set(
             player.character.position.x,
@@ -536,26 +545,148 @@ export function createPlayerModeController(player, camera) {
     }
 
     const boxes = getBlockBoxes();
-    const world = player.character.position;
     const sneaking = player.character.isSneaking;
+    const ship = player.ship;
 
-    const localStart = player.ship.transform.worldToLocalPosition(world);
-    const onGround = probeOnGround(localStart.x, localStart.y, localStart.z, boxes, sneaking)
-      || (player.character.isOnGround && state.motionY <= 0);
+    // --- Riding: move entirely in ship-local space (0 relative to hull) ---
+    if (state.ridingShip && state.shipLocalFeet) {
+      const localStart = state.shipLocalFeet;
 
-    const vertical = integrateVertical(state.motionY, onGround, state.jumpRequested, deltaTime);
+      const onGround = probeOnGround(localStart.x, localStart.y, localStart.z, boxes, sneaking)
+        || (player.character.isOnGround && state.motionY <= 0);
+
+      const vertical = integrateVertical(state.motionY, onGround, state.jumpRequested, deltaTime);
+      state.motionY = vertical.motionY;
+
+      // Walk velocity is world-oriented from camera — convert to ship-local delta
+      const walkWorld = {
+        x: player.character.velocity.x * deltaTime,
+        y: vertical.deltaY,
+        z: player.character.velocity.z * deltaTime
+      };
+      const startWorld = localFeetToWorld(ship, localStart.x, localStart.y, localStart.z);
+      const localMove = worldMovementToLocal(
+        ship,
+        startWorld.x,
+        startWorld.y,
+        startWorld.z,
+        walkWorld.x,
+        walkWorld.y,
+        walkWorld.z
+      );
+
+      if (sneaking && (localMove.dx !== 0 || localMove.dz !== 0)) {
+        const tryWorld = localFeetToWorld(
+          ship,
+          localStart.x + localMove.dx,
+          localStart.y,
+          localStart.z + localMove.dz
+        );
+        if (!hasGroundSupport(tryWorld.x, tryWorld.y, tryWorld.z)) {
+          localMove.dx = 0;
+          localMove.dz = 0;
+        }
+      }
+
+      const moved = movePlayer(
+        localStart.x,
+        localStart.y,
+        localStart.z,
+        localMove.dx,
+        localMove.dy,
+        localMove.dz,
+        boxes,
+        sneaking
+      );
+
+      state.shipLocalFeet = { x: moved.x, y: moved.y, z: moved.z };
+
+      if (vertical.jumped) {
+        player.character.isJumping = true;
+        player.character.isOnGround = false;
+      }
+
+      const grounded = moved.onGround
+        || probeOnGround(moved.x, moved.y, moved.z, boxes, sneaking);
+      player.character.isOnGround = grounded && state.motionY <= 0;
+
+      if (grounded) {
+        player.character.isJumping = false;
+        if (state.motionY < 0) {
+          state.motionY = 0;
+        }
+        if (state.motionY <= 0) {
+          const topY = nearestBlockTopBelow(moved.x, moved.y + 0.1, moved.z, boxes);
+          if (topY !== null && Math.abs(moved.y - topY) <= GROUND_SNAP_GAP) {
+            state.shipLocalFeet.y = topY;
+          }
+        }
+      }
+      if (moved.hitCeiling) {
+        state.motionY = 0;
+      }
+
+      player.character.velocity.y = state.motionY / MC_TICK;
+
+      // Left the deck — inherit hull velocity once, then freefall (no more ship parenting)
+      const nearTop = nearestBlockTopBelow(moved.x, moved.y + 2, moved.z, boxes);
+      if (!grounded && shouldDetachFromDeck({
+        grounded,
+        aboveDeck: nearTop !== null && (moved.y - nearTop) < 1.5,
+        motionY: state.motionY
+      })) {
+        detachFromShip();
+      }
+
+      // Write world position from local (rides with ship this frame)
+      if (state.ridingShip && state.shipLocalFeet) {
+        const feetWorld = localFeetToWorld(
+          ship,
+          state.shipLocalFeet.x,
+          state.shipLocalFeet.y,
+          state.shipLocalFeet.z
+        );
+        player.character.position.x = feetWorld.x;
+        player.character.position.y = feetWorld.y;
+        player.character.position.z = feetWorld.z;
+      }
+      return;
+    }
+
+    // --- Freefall / off-ship: world motion; can re-board if we land on a block ---
+    const world = player.character.position;
+    const localStart = ship.transform.worldToLocalPosition(world);
+    const onGround = probeOnGround(localStart.x, localStart.y, localStart.z, boxes, sneaking);
+
+    if (onGround) {
+      // Landed back on the ship
+      state.ridingShip = true;
+      state.shipLocalFeet = { x: localStart.x, y: localStart.y, z: localStart.z };
+      player.character.velocity.x = 0;
+      player.character.velocity.z = 0;
+      // Re-run as riding next frame; settle this frame
+      const topY = nearestBlockTopBelow(localStart.x, localStart.y + 0.1, localStart.z, boxes);
+      if (topY !== null) {
+        state.shipLocalFeet.y = topY;
+      }
+      const feetWorld = localFeetToWorld(ship, state.shipLocalFeet.x, state.shipLocalFeet.y, state.shipLocalFeet.z);
+      player.character.position.x = feetWorld.x;
+      player.character.position.y = feetWorld.y;
+      player.character.position.z = feetWorld.z;
+      player.character.isOnGround = true;
+      state.motionY = 0;
+      return;
+    }
+
+    const vertical = integrateVertical(state.motionY, false, state.jumpRequested, deltaTime);
     state.motionY = vertical.motionY;
 
     let dx = player.character.velocity.x * deltaTime;
     let dz = player.character.velocity.z * deltaTime;
     const dy = vertical.deltaY;
 
-    if (sneaking && (dx !== 0 || dz !== 0) && !hasGroundSupport(world.x + dx, world.y, world.z + dz)) {
-      dx = 0;
-      dz = 0;
-    }
-
-    const localMove = worldMovementToLocal(player.ship, world.x, world.y, world.z, dx, dy, dz);
+    // Still collide with ship blocks while falling past them
+    const localMove = worldMovementToLocal(ship, world.x, world.y, world.z, dx, dy, dz);
     const moved = movePlayer(
       localMove.x,
       localMove.y,
@@ -567,14 +698,13 @@ export function createPlayerModeController(player, camera) {
       sneaking
     );
 
-    const feetWorld = localFeetToWorld(player.ship, moved.x, moved.y, moved.z);
+    const feetWorld = localFeetToWorld(ship, moved.x, moved.y, moved.z);
     player.character.position.x = feetWorld.x;
     player.character.position.y = feetWorld.y;
     player.character.position.z = feetWorld.z;
 
     if (vertical.jumped) {
       player.character.isJumping = true;
-      player.character.isOnGround = false;
     }
 
     const grounded = moved.onGround
@@ -582,25 +712,66 @@ export function createPlayerModeController(player, camera) {
     player.character.isOnGround = grounded && state.motionY <= 0;
 
     if (grounded) {
+      state.ridingShip = true;
+      state.shipLocalFeet = { x: moved.x, y: moved.y, z: moved.z };
+      player.character.velocity.x = 0;
+      player.character.velocity.z = 0;
       player.character.isJumping = false;
-      if (state.motionY < 0) {
-        state.motionY = 0;
-      }
+      state.motionY = 0;
     }
     if (moved.hitCeiling) {
       state.motionY = 0;
     }
 
     player.character.velocity.y = state.motionY / MC_TICK;
+  }
 
-    if (state.motionY <= 0) {
-      snapFeetToGround();
+  /** Leave deck: keep current world velocity (ship + walk), stop ship-local parenting. */
+  function detachFromShip() {
+    if (!state.ridingShip || !player.ship) {
+      return;
     }
+    const exit = inheritShipExitVelocity(player.ship.velocity, player.character.velocity);
+    player.character.velocity.x = exit.x;
+    player.character.velocity.z = exit.z;
+    state.ridingShip = false;
+    state.shipLocalFeet = null;
+  }
+
+  /**
+   * After ship physics moves the hull, re-apply ship-local feet ONLY while riding.
+   * Off-ship freefall must not be dragged by the hull.
+   */
+  function syncToShipAfterPhysics() {
+    if (!state.active || !player.ship || !state.ridingShip || !state.shipLocalFeet) {
+      return;
+    }
+    const { x, y, z } = state.shipLocalFeet;
+    const feetWorld = localFeetToWorld(player.ship, x, y, z);
+    player.character.position.x = feetWorld.x;
+    player.character.position.y = feetWorld.y;
+    player.character.position.z = feetWorld.z;
+    if (player.character.mesh && player.character.viewMode !== 'ship-marker') {
+      player.character.mesh.position.set(feetWorld.x, feetWorld.y, feetWorld.z);
+    }
+    updateCamera();
   }
 
   /**
    * Update the camera position
    */
+  function setCameraAngles(pitch, yaw) {
+    state.cameraRotation.x = pitch;
+    state.cameraRotation.y = yaw;
+    player.cameraRotation.x = pitch;
+    player.cameraRotation.y = yaw;
+    player.character.rotation = yaw;
+    if (player.character.mesh) {
+      player.character.mesh.rotation.y = yaw;
+    }
+    updateCamera();
+  }
+
   function updateCamera() {
     if (!state.active) return;
 
@@ -664,16 +835,22 @@ export function createPlayerModeController(player, camera) {
 
     player.controls?.blockInteractions?.updateTargetOutline?.();
 
-    if (player.ship?.transform) {
-      const local = player.ship.transform.worldToLocalPosition(player.character.position);
-      if (local.y < -2) {
+    if (player.ship?.transform && state.ridingShip) {
+      const local = state.shipLocalFeet
+        ?? player.ship.transform.worldToLocalPosition(player.character.position);
+      // Safety only — true freefall off the map, not normal walk-off
+      if (local.y < -40) {
         const feetWorld = getControlBlockFeetWorld(player.ship);
         if (feetWorld) {
           player.character.position.x = feetWorld.x;
           player.character.position.y = feetWorld.y;
           player.character.position.z = feetWorld.z;
+          state.shipLocalFeet = player.ship.transform.worldToLocalPosition(feetWorld);
+          state.ridingShip = true;
           state.motionY = 0;
+          player.character.velocity.x = 0;
           player.character.velocity.y = 0;
+          player.character.velocity.z = 0;
           player.character.isJumping = false;
           player.character.isOnGround = true;
         }
@@ -701,6 +878,8 @@ export function createPlayerModeController(player, camera) {
     handleMouseDown,
     handleMouseUp,
     updateCamera,
+    setCameraAngles,
+    syncToShipAfterPhysics,
     update,
     get active() {
       return state.active;

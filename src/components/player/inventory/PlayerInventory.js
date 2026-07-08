@@ -9,6 +9,18 @@
  */
 
 class PlayerInventory {
+  // ponytail: control blocks belong on ships only, not player hotbar
+  static NON_PLAYER_TYPES = new Set(['control', 'steeringWheel', 'steering']);
+
+  static DEFAULT_BUILD_BLOCKS = [
+    { type: 'wood', count: 999 },
+    { type: 'stone', count: 999 },
+    { type: 'lift', count: 999 },
+    { type: 'cannon', count: 999 },
+    { type: 'dispenser', count: 999 },
+    { type: 'redstone', count: 999 }
+  ];
+
   /**
    * Constructor for the PlayerInventory class
    */
@@ -23,24 +35,35 @@ class PlayerInventory {
    * Initialize the inventory with default blocks
    */
   initialize() {
-    // Add some default blocks to the inventory
-    const defaultBlocks = [
-      { type: 'wood', count: 999 },
-      { type: 'stone', count: 999 },
-      { type: 'lift', count: 999 },
-      { type: 'cannon', count: 999 },
-      { type: 'control', count: 999 }
-    ];
-    
-    // Add each block type to the inventory
-    defaultBlocks.forEach((block, index) => {
+    PlayerInventory.DEFAULT_BUILD_BLOCKS.forEach((block, index) => {
       if (index < this.slots.length) {
-        this.slots[index] = block;
+        this.slots[index] = { ...block };
       } else {
-        // If we have more block types than slots, just add them to the inventory
         this.addItem(block);
       }
     });
+    this.stripNonPlayerBlocks();
+  }
+
+  /** Backfill new block types into saved inventories. */
+  ensureBuildBlocks(types = ['dispenser', 'redstone']) {
+    for (const type of types) {
+      if (this.slots.some((slot) => slot?.type === type)) {
+        continue;
+      }
+      const emptyIndex = this.slots.findIndex((slot) => !slot);
+      if (emptyIndex >= 0) {
+        this.slots[emptyIndex] = { type, count: 999 };
+      } else {
+        this.addItem({ type, count: 999 });
+      }
+    }
+  }
+
+  stripNonPlayerBlocks() {
+    this.slots = this.slots.map((slot) =>
+      slot && PlayerInventory.NON_PLAYER_TYPES.has(slot.type) ? null : slot
+    );
   }
 
   /**
@@ -197,6 +220,8 @@ class PlayerInventory {
           this.maxStackSize = parsedData.maxStackSize;
           this.infiniteBlocks = parsedData.infiniteBlocks !== undefined ? 
             parsedData.infiniteBlocks : true; // Default to true if not specified
+          this.stripNonPlayerBlocks();
+          this.ensureBuildBlocks();
           
           console.log("Inventory loaded from localStorage");
           return true;

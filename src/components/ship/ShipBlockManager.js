@@ -6,6 +6,12 @@
 
 import * as THREE from 'three';
 import BlockFactory from '../../blocks/blockFactory.js';
+import { recalculateShipHealth, updateSinkingState } from '../../combat/shipCombat.js';
+import {
+  canBreakControlBlock,
+  isControlBlockType,
+  syncControlBlocks
+} from '../../blocks/controlBlockRules.js';
 
 class ShipBlockManager {
   /**
@@ -84,18 +90,20 @@ class ShipBlockManager {
       console.error(`Error creating mesh for ${block.type} block:`, error);
     }
     
-    // If it's a steering wheel or control block, store a reference
-    if (block.type === 'steeringWheel' || block.type === 'control') {
-      this.ship.steeringWheel = block;
-      console.log(`Set ${block.type} as steering wheel reference`);
+    if (isControlBlockType(block.type)) {
+      const extras = syncControlBlocks(this.ship);
+      if (extras > 0) {
+        console.warn(`Ship has ${extras + 1} control blocks — extras are red and removable`);
+      }
     }
-    
+
     // Hide debug placeholder when the ship has real blocks
     if (this.ship.debugMesh && this.blocks.length > 0) {
       this.ship.debugMesh.visible = false;
     }
 
-    // Check if the ship has enough lift
+    // Check lift / sinking after block add
+    recalculateShipHealth(this.ship);
     this.checkLift();
     
     // Return the block for chaining
@@ -123,10 +131,10 @@ class ShipBlockManager {
     }
     
     const block = this.blocks[blockIndex];
-    
-    // Check if this is a critical block (e.g., steering wheel)
-    if (block.type === 'control') {
-      console.warn("Cannot remove steering wheel block");
+
+    // Primary control is protected; extras (red) can be removed
+    if (isControlBlockType(block.type) && !canBreakControlBlock(block)) {
+      console.warn('Cannot remove primary steering wheel — remove extra (red) controls first');
       return false;
     }
     
@@ -140,38 +148,44 @@ class ShipBlockManager {
       if (block.mesh.geometry) {
         block.mesh.geometry.dispose();
       }
-      
-      if (block.mesh.material) {
+
+      if (block.type === 'engine') {
+        block.disposeEngineMaterials?.();
+      } else if (block.mesh.material) {
         if (Array.isArray(block.mesh.material)) {
-          block.mesh.material.forEach(material => material.dispose());
+          block.mesh.material.forEach((material) => material.dispose());
         } else {
           block.mesh.material.dispose();
         }
       }
     }
+
+    block.disposeFlame?.();
     
     // Remove the block from the blocks array
     this.blocks.splice(blockIndex, 1);
+
+    if (isControlBlockType(block.type)) {
+      syncControlBlocks(this.ship);
+    }
     
     console.log(`Block removed from position ${JSON.stringify(position)}`);
     
-    // Check if the ship still has enough lift
+    recalculateShipHealth(this.ship);
     this.checkLift();
     
     return true;
   }
 
   /**
-   * Check if the ship has enough lift blocks (at least 30% of total)
+   * Check if the ship has enough lift blocks (at least 25% of total)
    */
   checkLift() {
-    const hasEnoughLift = BlockFactory.hasEnoughLift(this.blocks);
-    
-    if (!hasEnoughLift && !this.ship.isSinking) {
-      // Start sinking
-      this.ship.startSinking();
-    } else if (hasEnoughLift && this.ship.isSinking) {
-      // Stop sinking
+    const prevState = this.ship.sinkState;
+    updateSinkingState(this.ship);
+    if (this.ship.isSinking && prevState === 'none') {
+      this.ship.sinkingStartTime = performance.now();
+    } else if (!this.ship.isSinking) {
       this.ship.stopSinking();
     }
   }
@@ -288,9 +302,9 @@ class ShipBlockManager {
       return null;
     }
     
-    // Check if this is a critical block (e.g., steering wheel)
-    if (block.type === 'control' && !options.allowBreakingCritical) {
-      console.warn("Cannot break steering wheel block");
+    // Primary control protected; red extras can be broken
+    if (!canBreakControlBlock(block, options)) {
+      console.warn('Cannot break primary steering wheel');
       return null;
     }
     
@@ -316,6 +330,7 @@ class ShipBlockManager {
   clearBlocks() {
     // Remove all block meshes from the group
     for (const block of this.blocks) {
+      block.disposeFlame?.();
       if (block.mesh && block.mesh.parent) {
         block.mesh.parent.remove(block.mesh);
         
@@ -323,10 +338,12 @@ class ShipBlockManager {
         if (block.mesh.geometry) {
           block.mesh.geometry.dispose();
         }
-        
-        if (block.mesh.material) {
+
+        if (block.type === 'engine') {
+          block.disposeEngineMaterials?.();
+        } else if (block.mesh.material) {
           if (Array.isArray(block.mesh.material)) {
-            block.mesh.material.forEach(material => material.dispose());
+            block.mesh.material.forEach((material) => material.dispose());
           } else {
             block.mesh.material.dispose();
           }

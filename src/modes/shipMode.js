@@ -8,6 +8,8 @@
 import * as THREE from 'three';
 import { getControlBlockFeetWorld } from '../physics/shipLocalCollision.js';
 
+import { pulseShipDispensers } from '../combat/redstoneSystem.js';
+
 const CAMERA_SENSITIVITY = 0.003;
 const WHEEL_ORBIT_SENSITIVITY = 0.002;
 const MIN_CAMERA_DISTANCE = 8;
@@ -25,6 +27,7 @@ const MOUSE_WHEEL_DELTA_THRESHOLD = 40;
  */
 export function createShipModeController(player, camera, world) {
   let active = false;
+  let prevSpaceDown = false;
 
   // Orbit camera around ship (world space — independent of ship heading)
   let cameraYaw = 0;
@@ -35,7 +38,13 @@ export function createShipModeController(player, camera, world) {
     active = true;
     player.mode = 'ship';
 
-    if (player.character?.position && player.ship) {
+    const feet = getControlBlockFeetWorld(player.ship);
+    if (feet && player.character) {
+      player.character.position.x = feet.x;
+      player.character.position.y = feet.y;
+      player.character.position.z = feet.z;
+      player.character.showShipModeOutline(feet, player.ship);
+    } else if (player.character?.position && player.ship) {
       player.character.showShipModeOutline(player.character.position, player.ship);
     }
 
@@ -45,29 +54,81 @@ export function createShipModeController(player, camera, world) {
   function deactivate() {
     active = false;
     player.character?.hideShipModeOutline?.();
-    if (player.ship) {
-      player.ship.controls = {
-        forward: false,
-        backward: false,
-        left: false,
-        right: false,
-        up: false,
-        down: false
-      };
+    // Keep thrust latched when leaving ship mode (player walks deck while ship coasts/thrusts)
+    // Clear only turn / vertical / boost — forward/back persist until press+release in ship mode
+    if (player.ship?.controls) {
+      player.ship.controls.left = false;
+      player.ship.controls.right = false;
+      player.ship.controls.up = false;
+      player.ship.controls.down = false;
+      player.ship.controls.boost = false;
+      if (player.ship.controls.forward || player.ship.controls.backward) {
+        player.ship.thrustLatch = {
+          forward: !!player.ship.controls.forward,
+          backward: !!player.ship.controls.backward,
+          sawRelease: false
+        };
+      }
     }
   }
 
   function handleInput(keys) {
     if (!active || !player.ship) return;
 
-    player.ship.controls = {
-      forward: !!(keys.forward || keys.w),
-      backward: !!(keys.backward || keys.s),
-      left: !!(keys.left || keys.a),
-      right: !!(keys.right || keys.d),
-      up: !!keys.q,
-      down: !!keys.e
-    };
+    const forwardDown = !!(keys.forward || keys.w);
+    const backwardDown = !!(keys.backward || keys.s);
+    const latch = player.ship.thrustLatch;
+
+    // Intro-style latch: keep thrusting after mode switch until press then release
+    if (latch) {
+      if (!latch.sawRelease) {
+        if (forwardDown || backwardDown) {
+          latch.sawRelease = true;
+        }
+        player.ship.controls = {
+          forward: latch.forward || forwardDown,
+          backward: latch.backward || backwardDown,
+          left: !!(keys.left || keys.a),
+          right: !!(keys.right || keys.d),
+          up: !!keys.q,
+          down: !!keys.e,
+          boost: !!keys.sprint
+        };
+      } else {
+        player.ship.controls = {
+          forward: forwardDown,
+          backward: backwardDown,
+          left: !!(keys.left || keys.a),
+          right: !!(keys.right || keys.d),
+          up: !!keys.q,
+          down: !!keys.e,
+          boost: !!keys.sprint
+        };
+        if (!forwardDown && !backwardDown) {
+          player.ship.thrustLatch = null;
+        }
+      }
+    } else {
+      player.ship.controls = {
+        forward: forwardDown,
+        backward: backwardDown,
+        left: !!(keys.left || keys.a),
+        right: !!(keys.right || keys.d),
+        up: !!keys.q,
+        down: !!keys.e,
+        boost: !!keys.sprint
+      };
+    }
+
+    const spaceDown = !!keys.up;
+    if (spaceDown && !prevSpaceDown) {
+      const targets = typeof window !== 'undefined'
+        ? window.gameState?.arenaCombatContext?.targets
+          ?? Array.from(window.gameState?.players?.values?.() ?? [])
+        : [];
+      pulseShipDispensers(player.ship, targets);
+    }
+    prevSpaceDown = spaceDown;
   }
 
   function clampPitch() {
@@ -153,8 +214,25 @@ export function createShipModeController(player, camera, world) {
     camera.lookAt(target);
   }
 
+  function setOrbitAngles(pitch, yaw) {
+    cameraPitch = pitch;
+    cameraYaw = yaw;
+    clampPitch();
+    updateCamera();
+  }
+
   function update() {
     if (!active || !player.ship) return;
+    // Keep Steve glued to the control block while in ship mode
+    if (player.character?.showShipModeOutline) {
+      const feet = getControlBlockFeetWorld(player.ship);
+      if (feet) {
+        player.character.position.x = feet.x;
+        player.character.position.y = feet.y;
+        player.character.position.z = feet.z;
+        player.character.showShipModeOutline(feet, player.ship);
+      }
+    }
     updateCamera();
   }
 
@@ -165,6 +243,7 @@ export function createShipModeController(player, camera, world) {
     handleMouseMove,
     handleMouseWheel,
     updateCamera,
+    setOrbitAngles,
     update,
     get active() {
       return active;

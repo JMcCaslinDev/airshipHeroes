@@ -184,22 +184,30 @@ class Player {
           }
           
           if (fireDirection) {
-            this.ship.fireCannons(fireDirection, scene);
-            this.controls.state.fire = false; // Reset fire control
+            const fired = this.ship.fireCannons(fireDirection, scene);
+            if (fired?.length && typeof window !== 'undefined' && window.gameState?.addProjectile) {
+              fired.forEach((projectile) => {
+                if (projectile?.update) {
+                  window.gameState.addProjectile(projectile);
+                }
+              });
+            }
+            this.controls.state.fire = false;
           }
         }
       }
       
       // Update ship
       if (this.ship) {
+        const combatContext = typeof window !== 'undefined' ? window.gameState?.arenaCombatContext : null;
         // In player mode, ensure the ship doesn't sink
         if (this.mode === 'player') {
           const originalIsSinking = this.ship.isSinking;
           this.ship.isSinking = false;
-          this.ship.update(deltaTime);
+          this.ship.update(deltaTime, 500, combatContext);
           this.ship.isSinking = originalIsSinking;
         } else {
-          this.ship.update(deltaTime);
+          this.ship.update(deltaTime, 500, combatContext);
         }
       }
       

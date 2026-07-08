@@ -111,7 +111,7 @@ class Projectile {
     
     // Call the onExplode callback if provided
     if (this.onExplode) {
-      this.onExplode(this.position, this.damage);
+      this.onExplode(this.position, this.damage, this.owner);
     }
     
     // Remove the mesh from the scene

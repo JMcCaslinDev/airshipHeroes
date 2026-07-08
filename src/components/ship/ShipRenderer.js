@@ -6,6 +6,7 @@
 
 import * as THREE from 'three';
 import { attachBlockEdges } from '../../blocks/blockEdgeOutline.js';
+import { getBlockMeshLocalPosition } from '../../blocks/blockFactory.js';
 
 class ShipRenderer {
   /**
@@ -32,11 +33,7 @@ class ShipRenderer {
       // The mesh position should match the block's logical position
       // No need to apply ship rotation here as the mesh is a child of the ship group
       // which already has the rotation applied
-      const expectedPosition = {
-        x: block.position.x,
-        y: block.position.y,
-        z: block.position.z
-      };
+      const expectedPosition = getBlockMeshLocalPosition(block);
       
       // Check if the mesh position matches the expected position
       const currentPosition = {
@@ -206,11 +203,8 @@ class ShipRenderer {
       }
       
       // Set the mesh position to match the block's logical position
-      block.mesh.position.set(
-        block.position.x,
-        block.position.y,
-        block.position.z
-      );
+      const meshPos = getBlockMeshLocalPosition(block);
+      block.mesh.position.set(meshPos.x, meshPos.y, meshPos.z);
       
       // Set rotation if specified
       if (block.rotation) {
@@ -258,7 +252,13 @@ class ShipRenderer {
       block.mesh.userData.type = block.type;
       block.mesh.userData.gridPosition = { ...block.position };
       
-      attachBlockEdges(block.mesh);
+      if (block.type !== 'engine') {
+        attachBlockEdges(block.mesh);
+      }
+      
+      if (block.type === 'engine' && block.direction && !block.flameMesh) {
+        block.attachFlame?.(this.ship.group);
+      }
       
       updatedCount++;
     }

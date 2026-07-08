@@ -5,6 +5,7 @@
  */
 
 import * as THREE from 'three';
+import { SHIP_CATALOG } from '../ships/shipCatalog.js';
 
 /**
  * Create a resource loader
@@ -54,8 +55,10 @@ export function createResourceLoader(options = {}) {
     textures.set('lift', createCanvasTexture('#E9ECEC'));
     textures.set('cannon', createCanvasTexture('#7F7F7F'));
     textures.set('control', createCanvasTexture('#6B4423'));
-    textures.set('engine', createCanvasTexture('#444444'));
+    textures.set('engine', createCanvasTexture('#2e2e33'));
     textures.set('armor', createCanvasTexture('#985E2D'));
+    textures.set('dispenser', createCanvasTexture('#6e6e6e'));
+    textures.set('redstone', createCanvasTexture('#c42b1a'));
     textures.set('crosshair', createCanvasTexture('#FFFFFF'));
   };
   
@@ -182,8 +185,11 @@ export function createResourceLoader(options = {}) {
         { name: 'stone', path: '/assets/textures/blocks/stone.svg' },
         { name: 'lift', path: '/assets/textures/blocks/lift.svg' },
         { name: 'armor', path: '/assets/textures/blocks/armor.svg' },
+        { name: 'engine', path: '/assets/textures/blocks/engine.svg' },
         { name: 'cannon', path: '/assets/textures/blocks/cannon.svg' },
         { name: 'control', path: '/assets/textures/blocks/control.svg' },
+        { name: 'dispenser', path: '/assets/textures/blocks/dispenser.svg' },
+        { name: 'redstone', path: '/assets/textures/blocks/redstone.svg' },
         { name: 'crosshair', path: '/assets/textures/ui/crosshair.svg' }
       ];
       
@@ -258,12 +264,13 @@ export function createResourceLoader(options = {}) {
   function loadShipDefinitions() {
     return new Promise((resolve) => {
       console.log('Loading ship definitions...');
-      
-      // Define ship definitions to load
-      const shipFiles = [
-        { name: 'default', path: '/assets/ships/default.json' }
-      ];
-      
+
+      // Catalog under public/assets/ships/ (+ npc/)
+      const shipFiles = SHIP_CATALOG.map((entry) => ({
+        name: entry.id,
+        path: entry.path
+      }));
+
       // Update total resources
       totalResources += shipFiles.length;
       
@@ -364,8 +371,9 @@ export function createResourceLoader(options = {}) {
   return {
     loadAll,
     getTexture,
-    getShipDefinition,
-    getUrl,
+  getShipDefinition,
+  listShipDefinitions: () => Array.from(shipDefinitions.keys()),
+  getUrl,
     get textureLoader() {
       return textureLoader;
     },

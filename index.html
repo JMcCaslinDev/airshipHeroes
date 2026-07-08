@@ -65,6 +65,7 @@
   <!-- Build Toolbar (shown while editing a ship in the shipyard) -->
   <div id="build-toolbar" class="build-toolbar" style="display: none;">
     <span id="build-slot-label" class="build-slot-label">Editing Slot 1</span>
+    <span id="build-perf-stats" class="build-perf-stats">0 eng · wt 0 · max 0 mph</span>
     <button id="build-save-btn" class="secondary-button" type="button">Save</button>
     <button id="build-export-btn" class="secondary-button" type="button">Export JSON</button>
     <button id="build-import-btn" class="secondary-button" type="button">Import JSON</button>
@@ -74,13 +75,19 @@
   </div>
 
   <!-- Death Screen -->
-  <div id="death-screen" class="fullscreen-overlay" style="display: none;">
+  <div id="death-screen" class="fullscreen-overlay death-overlay" style="display: none;">
     <div class="death-container">
-      <h1>You Died!</h1>
-      <p>Your ship was destroyed.</p>
-      <button id="respawn-button" class="primary-button">Respawn</button>
+      <h1 id="death-title">Ship Destroyed</h1>
+      <p id="death-message">Your ship was destroyed.</p>
+      <div id="death-countdown" class="death-countdown">Respawning in 30...</div>
+      <div id="battle-chat" class="battle-chat"></div>
+      <div id="death-leaderboard" class="death-leaderboard"></div>
+      <button id="respawn-button" class="primary-button" style="display: none;">Respawn Now</button>
     </div>
   </div>
+
+  <div id="arena-chat" class="arena-chat"></div>
+  <div id="kill-feed" class="kill-feed" aria-live="polite"></div>
 
   <!-- Game Canvas -->
   <canvas id="game-canvas"></canvas>
@@ -107,8 +114,38 @@
           <span id="ship-speed" class="stat-value">0 mph</span>
         </div>
         <div class="stat-row">
+          <span class="stat-label">Cruise:</span>
+          <span id="ship-cruise-speed" class="stat-value">0 mph</span>
+        </div>
+        <div class="stat-row">
           <span class="stat-label">Max Speed:</span>
           <span id="ship-max-speed" class="stat-value">0 mph</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Engines:</span>
+          <span id="ship-engines" class="stat-value">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Weight:</span>
+          <span id="ship-weight" class="stat-value">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Boost:</span>
+          <span id="ship-boost-text" class="stat-value">Ready</span>
+        </div>
+        <div class="stat-row ship-health-bar-row">
+          <div id="ship-boost-bar" class="ship-boost-bar"><div id="ship-boost-fill"></div></div>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Lift:</span>
+          <span id="ship-lift-ratio" class="stat-value">0%</span>
+        </div>
+        <div class="stat-row ship-health-bar-row">
+          <div id="ship-lift-bar" class="ship-lift-bar"><div id="ship-lift-fill"></div></div>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Kills:</span>
+          <span id="hud-kills" class="stat-value">0</span>
         </div>
         <div class="stat-row">
           <span class="stat-label">Total Blocks:</span>
@@ -122,6 +159,21 @@
     <div id="bottom-hud">
       <div id="inventory">
         <!-- Inventory slots will be generated dynamically -->
+      </div>
+    </div>
+    <div id="nav-hud" class="nav-hud" aria-label="Navigation">
+      <div class="minimap-wrap">
+        <canvas id="minimap-canvas" width="148" height="148" aria-label="Arena minimap"></canvas>
+      </div>
+      <div id="compass" class="compass">
+        <div class="compass-ring">
+          <span class="compass-mark n">N</span>
+          <span class="compass-mark e">E</span>
+          <span class="compass-mark s">S</span>
+          <span class="compass-mark w">W</span>
+          <div id="compass-needle" class="compass-needle"></div>
+        </div>
+        <div id="compass-heading" class="compass-heading">0°</div>
       </div>
     </div>
   </div>

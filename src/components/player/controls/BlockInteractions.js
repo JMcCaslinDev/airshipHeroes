@@ -88,7 +88,7 @@ class BlockInteractions {
     const { block, mesh } = target;
     const key = this.positionKey(block.position);
 
-    if (isUnbreakableBlock(block.type)) {
+    if (isUnbreakableBlock(block.type, block)) {
       this.cancelMining();
       return false;
     }
@@ -98,7 +98,7 @@ class BlockInteractions {
       this.mining = { block, mesh, key, progress: 0 };
     }
 
-    const breakSeconds = getBlockBreakSeconds(block.type);
+    const breakSeconds = getBlockBreakSeconds(block.type, block);
     this.mining.progress += deltaTime / breakSeconds;
     setBlockCrackStage(mesh, breakProgressToStage(this.mining.progress));
 
@@ -140,7 +140,7 @@ class BlockInteractions {
     if (!target) {
       return false;
     }
-    if (isUnbreakableBlock(target.block.type)) {
+    if (isUnbreakableBlock(target.block.type, target.block)) {
       return false;
     }
     return this.finishBlockBreak(target.block);

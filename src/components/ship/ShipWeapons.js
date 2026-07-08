@@ -76,19 +76,21 @@ class ShipWeapons {
     // Create the projectile
     const projectile = cannon.fire(scene, this.ship.velocity);
     
-    // If firing was successful, return the projectile
+    // If firing was successful, register tracked projectile when handler is set
     if (projectile) {
-      // Add ship velocity to projectile velocity (stored on userData by cannon.fire)
-      if (projectile.userData.velocity) {
+      if (this.ship.registerCannonShot) {
+        return this.ship.registerCannonShot(projectile, scene);
+      }
+
+      if (projectile.userData?.velocity) {
         projectile.userData.velocity.x += this.ship.velocity.x;
         projectile.userData.velocity.z += this.ship.velocity.z;
       }
-      
-      // Set the owner of the projectile
+
       if (this.ship.owner) {
         projectile.owner = this.ship.owner;
       }
-      
+
       return projectile;
     }
     

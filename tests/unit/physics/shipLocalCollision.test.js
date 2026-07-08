@@ -86,7 +86,7 @@ describe('getControlBlockFeetWorld', () => {
     expect(back.z).toBeCloseTo(0, 5);
   });
 
-  test('ignores blocks without mesh in scene', () => {
+  test('includes solid blocks even without mesh parent (no phase-through)', () => {
     const ship = makeDeckShip(0, 2);
     const ghost = {
       type: 'wood',
@@ -94,7 +94,7 @@ describe('getControlBlockFeetWorld', () => {
       mesh: new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1))
     };
     ship.blockManager.blocks.push(ghost);
-    expect(getShipLocalBlockBoxes(ship)).toHaveLength(4);
+    expect(getShipLocalBlockBoxes(ship)).toHaveLength(5);
   });
 });
 

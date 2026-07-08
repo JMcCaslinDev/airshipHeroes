@@ -71,11 +71,8 @@ export function createRenderer(options = {}) {
     
     console.log('Renderer initialized with camera at:', camera.position);
     
-    // Create skybox
+    // Sky only — voxel landscape is added after resources load
     createSkybox();
-    
-    // Create ground
-    createGround();
   }
   
   /**

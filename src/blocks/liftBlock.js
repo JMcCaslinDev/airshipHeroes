@@ -2,7 +2,7 @@
  * Lift Block Class
  * 
  * Lift blocks provide lift to keep the ship airborne.
- * - Minimum 30% of total ship blocks must be Lift Blocks, or the ship sinks at 1 altitude/second.
+ * - Minimum 25% of total ship blocks must be Lift Blocks, or the ship sinks slowly.
  * - Flammable (like Minecraft wool), subject to fire spread mechanics.
  * - Base health: 1 unit.
  */

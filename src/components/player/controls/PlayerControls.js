@@ -20,7 +20,8 @@ class PlayerControls {
       down: false,
       jump: false,
       sneak: false,
-      fire: false
+      fire: false,
+      dispenserPulse: false
     };
 
     this.blockInteractions = new BlockInteractions(player);

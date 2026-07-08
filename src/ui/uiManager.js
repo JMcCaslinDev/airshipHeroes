@@ -4,6 +4,16 @@
 
 import * as THREE from 'three';
 import { createElement, showElement, hideElement, removeAllChildren } from '../utils/domUtils.js';
+import { getLiftRatio } from '../combat/shipCombat.js';
+import { getLeaderboard } from '../combat/leaderboard.js';
+import { formatKillChatLine } from '../combat/killFeed.js';
+import { updateArenaOverheadLabels } from './shipOverheadLabel.js';
+import {
+  computeShipPerformanceFromShip,
+  formatSpeedMph
+} from '../physics/shipPerformance.js';
+import { ensureShipBoost, BOOST_DURATION } from '../physics/shipBoost.js';
+import { drawMinimap, updateCompass, MINIMAP_SIZE } from './minimap.js';
 
 /**
  * Create a UI manager
@@ -30,9 +40,32 @@ export function createUIManager(gameState, loginCallback) {
   let shipPosition;
   let shipAltitude;
   let shipSpeed;
+  let shipCruiseSpeed;
   let shipMaxSpeed;
+  let shipEngines;
+  let shipWeight;
+  let shipBoostText;
+  let shipBoostFill;
   let shipTotalBlocks;
   let blockTypeStats;
+  let shipLiftRatio;
+  let shipLiftFill;
+  let hudKills;
+  let deathTitle;
+  let deathMessage;
+  let deathCountdown;
+  let deathLeaderboard;
+  let battleChat;
+  let arenaChat;
+  let killFeedRoot;
+  let minimapCanvas;
+  let compassNeedle;
+  let compassHeading;
+
+  let respawnCallback = null;
+  let chatMessages = [];
+  const killBannerQueue = [];
+  let killBannerShowing = false;
   
   /**
    * Initialize the UI manager
@@ -58,9 +91,31 @@ export function createUIManager(gameState, loginCallback) {
     shipPosition = document.getElementById('ship-position');
     shipAltitude = document.getElementById('ship-altitude');
     shipSpeed = document.getElementById('ship-speed');
+    shipCruiseSpeed = document.getElementById('ship-cruise-speed');
     shipMaxSpeed = document.getElementById('ship-max-speed');
+    shipEngines = document.getElementById('ship-engines');
+    shipWeight = document.getElementById('ship-weight');
+    shipBoostText = document.getElementById('ship-boost-text');
+    shipBoostFill = document.getElementById('ship-boost-fill');
     shipTotalBlocks = document.getElementById('ship-total-blocks');
     blockTypeStats = document.getElementById('block-type-stats');
+    shipLiftRatio = document.getElementById('ship-lift-ratio');
+    shipLiftFill = document.getElementById('ship-lift-fill');
+    hudKills = document.getElementById('hud-kills');
+    deathTitle = document.getElementById('death-title');
+    deathMessage = document.getElementById('death-message');
+    deathCountdown = document.getElementById('death-countdown');
+    deathLeaderboard = document.getElementById('death-leaderboard');
+    battleChat = document.getElementById('battle-chat');
+    arenaChat = document.getElementById('arena-chat');
+    killFeedRoot = document.getElementById('kill-feed');
+    minimapCanvas = document.getElementById('minimap-canvas');
+    compassNeedle = document.getElementById('compass-needle');
+    compassHeading = document.getElementById('compass-heading');
+    if (minimapCanvas) {
+      minimapCanvas.width = MINIMAP_SIZE;
+      minimapCanvas.height = MINIMAP_SIZE;
+    }
     
     // Log UI elements for debugging
     console.log('UI elements initialized:');
@@ -223,14 +278,110 @@ export function createUIManager(gameState, loginCallback) {
     }
   }
   
-  /**
-   * Handle respawn button click
-   */
+  function setRespawnCallback(fn) {
+    respawnCallback = fn;
+  }
+
+  function appendChatMessage(message) {
+    chatMessages.unshift(message);
+    chatMessages = chatMessages.slice(0, 12);
+    const html = chatMessages.map((line) => `<div class="chat-line">${line}</div>`).join('');
+    if (arenaChat) {
+      arenaChat.style.display = 'block';
+      arenaChat.innerHTML = html;
+    }
+    if (battleChat) {
+      battleChat.innerHTML = html;
+    }
+  }
+
+  function pushKillBanner(title, subtitle = '', type = 'kill') {
+    killBannerQueue.push({ title, subtitle, type });
+    drainKillBannerQueue();
+  }
+
+  function drainKillBannerQueue() {
+    if (killBannerShowing || !killFeedRoot || killBannerQueue.length === 0) {
+      return;
+    }
+
+    const banner = killBannerQueue.shift();
+    killBannerShowing = true;
+    killFeedRoot.className = `kill-feed kill-feed--${banner.type} kill-feed--visible`;
+    killFeedRoot.innerHTML = `
+      <div class="kill-feed-title">${banner.title}</div>
+      ${banner.subtitle ? `<div class="kill-feed-subtitle">${banner.subtitle}</div>` : ''}
+    `;
+
+    window.setTimeout(() => {
+      killFeedRoot.classList.remove('kill-feed--visible');
+      killBannerShowing = false;
+      window.setTimeout(drainKillBannerQueue, 180);
+    }, 2800);
+  }
+
+  function showKillFeed(event) {
+    if (!event) {
+      return;
+    }
+
+    appendChatMessage(formatKillChatLine(event));
+
+    if (event.isLocalKill) {
+      pushKillBanner(
+        `Eliminated ${event.victim}`,
+        event.killerStreak >= 2 ? `${event.killerStreak} kill streak!` : 'Confirmed kill',
+        'kill'
+      );
+      if (event.victimEndedStreak >= 3) {
+        pushKillBanner(
+          'Streak ended',
+          `You stopped ${event.victim}'s ${event.victimEndedStreak} kill streak`,
+          'streak-break'
+        );
+      }
+      return;
+    }
+
+    if (event.isLocalDeath && event.victimEndedStreak >= 2) {
+      pushKillBanner(
+        'Your streak ended',
+        `${event.victimEndedStreak} kills — taken down by ${event.killer}`,
+        'death-streak'
+      );
+      return;
+    }
+
+    if (event.victimEndedStreak >= 4) {
+      pushKillBanner(
+        `${event.killer} ended a streak`,
+        `${event.victim}'s ${event.victimEndedStreak} kill streak is over`,
+        'streak-break'
+      );
+    }
+  }
+
+  function renderLeaderboard(container, entries) {
+    if (!container) {
+      return;
+    }
+    removeAllChildren(container);
+    const title = createElement('h3', { textContent: 'Leaderboard' });
+    container.appendChild(title);
+    entries.forEach((row, index) => {
+      container.appendChild(createElement('div', {
+        className: 'leaderboard-row',
+        textContent: `${index + 1}. ${row.username} — ${row.kills} kills / ${row.deaths} deaths`
+      }));
+    });
+  }
+  
   function handleRespawn() {
     hideDeathScreen();
     showHUD();
+    respawnCallback?.();
   }
-  
+
   /**
    * Show the loading screen
    */
@@ -284,8 +435,40 @@ export function createUIManager(gameState, loginCallback) {
   /**
    * Show the death screen
    */
-  function showDeathScreen() {
+  function showDeathScreen(options = {}) {
+    if (deathTitle) {
+      deathTitle.textContent = 'Ship Destroyed';
+    }
+    if (deathMessage) {
+      const killer = options.killerName;
+      const victim = options.victimName ?? 'Your ship';
+      deathMessage.textContent = killer
+        ? `${killer} destroyed ${victim}`
+        : `${victim} was destroyed.`;
+    }
+    if (options.leaderboard) {
+      renderLeaderboard(deathLeaderboard, options.leaderboard);
+    } else {
+      renderLeaderboard(deathLeaderboard, getLeaderboard());
+    }
+    if (deathCountdown) {
+      deathCountdown.textContent = `Respawning in ${options.countdown ?? 30}...`;
+    }
+    if (respawnButton) {
+      respawnButton.style.display = 'none';
+    }
     showElement(deathScreen, 'flex');
+  }
+
+  function updateDeathCountdown(seconds) {
+    if (deathCountdown) {
+      deathCountdown.textContent = seconds > 0
+        ? `Respawning in ${seconds}...`
+        : 'Respawn ready';
+    }
+    if (respawnButton) {
+      respawnButton.style.display = seconds <= 0 ? 'inline-block' : 'none';
+    }
   }
   
   /**
@@ -436,19 +619,73 @@ export function createUIManager(gameState, loginCallback) {
       shipAltitude.textContent = `${Math.round(ship.position.y)} m`;
     }
     
-    // Update speed
+    const perf = ship.performance ?? computeShipPerformanceFromShip(ship);
+
+    // Update speed — color: white cruise band, orange when above cruise / boosting
     if (shipSpeed) {
-      // Convert units/second to mph (arbitrary conversion for game feel)
       const speedVector = new THREE.Vector3(ship.velocity.x, 0, ship.velocity.z);
-      const speedMph = Math.round(speedVector.length() * 2.237 * 10) / 10; // Convert to mph with 1 decimal
-      shipSpeed.textContent = `${speedMph} mph`;
+      const speed = speedVector.length();
+      const mph = formatSpeedMph(speed);
+      shipSpeed.textContent = `${mph} mph`;
+      const cruise = perf?.cruiseMaxSpeed ?? (perf?.maxSpeed ?? 0) * 0.5;
+      if (ship.boostActive || speed > cruise + 0.05) {
+        shipSpeed.style.color = '#ffaa44';
+      } else if (speed > cruise * 0.85) {
+        shipSpeed.style.color = '#88ffaa';
+      } else {
+        shipSpeed.style.color = '#ffffff';
+      }
     }
-    
-    // Update max speed (theoretical based on thrust and drag)
+
+    if (shipCruiseSpeed) {
+      shipCruiseSpeed.textContent = `${formatSpeedMph(perf.cruiseMaxSpeed)} mph`;
+      shipCruiseSpeed.style.color = '#88ccff';
+    }
     if (shipMaxSpeed) {
-      // This is an approximation based on the physics constants
-      const maxSpeedMph = Math.round(20 * 2.237); // Assuming max speed of 20 units/s
-      shipMaxSpeed.textContent = `${maxSpeedMph} mph`;
+      shipMaxSpeed.textContent = `${formatSpeedMph(perf.maxSpeed)} mph`;
+      shipMaxSpeed.style.color = ship.boostActive ? '#ffaa44' : '#aaaaaa';
+    }
+    if (shipEngines) {
+      shipEngines.textContent = String(perf.engines);
+    }
+    if (shipWeight) {
+      shipWeight.textContent = String(perf.weight);
+    }
+
+    const boost = ensureShipBoost(ship);
+    if (shipBoostText && boost) {
+      if (boost.active) {
+        shipBoostText.textContent = `BOOST ${boost.remaining.toFixed(1)}s`;
+        shipBoostText.style.color = '#ffaa44';
+      } else if (boost.charge >= 1) {
+        shipBoostText.textContent = 'Ready (Shift)';
+        shipBoostText.style.color = '#88ffaa';
+      } else {
+        shipBoostText.textContent = `Recharge ${Math.round(boost.charge * 100)}%`;
+        shipBoostText.style.color = '#cccccc';
+      }
+    }
+    if (shipBoostFill && boost) {
+      const pct = boost.active
+        ? (boost.remaining / BOOST_DURATION) * 100
+        : boost.charge * 100;
+      shipBoostFill.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+      shipBoostFill.classList.toggle('boosting', !!boost.active);
+    }
+
+    const liftRatio = getLiftRatio(ship);
+    ship.liftRatio = liftRatio;
+    const liftPct = Math.round(liftRatio * 100);
+    if (shipLiftRatio) {
+      shipLiftRatio.textContent = `${liftPct}%`;
+      shipLiftRatio.style.color = liftRatio >= 0.25 ? '#66ff99' : '#ff6666';
+    }
+    if (shipLiftFill) {
+      shipLiftFill.style.width = `${liftPct}%`;
+      shipLiftFill.classList.toggle('low', liftRatio < 0.25);
+    }
+    if (hudKills && gameState.localPlayer) {
+      hudKills.textContent = String(gameState.localPlayer.kills ?? 0);
     }
     
     // Update total blocks
@@ -542,7 +779,7 @@ export function createUIManager(gameState, loginCallback) {
       'gold': '#FFD700',
       'lift': '#E9ECEC',
       'armor': '#985E2D',
-      'engine': '#FF4500',
+      'engine': '#1c1c20',
       'cannon': '#7F7F7F',
       'control': '#6B4423',
       'steering': '#6B4423',
@@ -552,6 +789,46 @@ export function createUIManager(gameState, loginCallback) {
     return colors[blockType] || colors.default;
   }
   
+  /**
+   * Compass + bird's-eye minimap with enemy dots.
+   */
+  function updateNavHud() {
+    const local = gameState.localPlayer;
+    const ship = local?.ship;
+    if (!ship) {
+      return;
+    }
+
+    updateCompass(compassNeedle, compassHeading, ship.rotation ?? 0);
+
+    if (!minimapCanvas) {
+      return;
+    }
+
+    const enemies = [];
+    const players = gameState.players;
+    if (players?.values) {
+      for (const p of players.values()) {
+        if (!p?.ship || p === local || p.ship.isDestroyed) {
+          continue;
+        }
+        enemies.push({
+          x: p.ship.position.x,
+          z: p.ship.position.z
+        });
+      }
+    }
+
+    drawMinimap(minimapCanvas, {
+      self: {
+        x: ship.position.x,
+        z: ship.position.z,
+        rotation: ship.rotation ?? 0
+      },
+      enemies
+    });
+  }
+
   /**
    * Update the UI
    */
@@ -567,6 +844,10 @@ export function createUIManager(gameState, loginCallback) {
     
     // Update ship stats
     updateShipStats();
+
+    updateNavHud();
+
+    updateArenaOverheadLabels(gameState);
   }
   
   /**
@@ -643,6 +924,11 @@ export function createUIManager(gameState, loginCallback) {
     hideHUD,
     showDeathScreen,
     hideDeathScreen,
+    updateDeathCountdown,
+    appendChatMessage,
+    showKillFeed,
+    setRespawnCallback,
+    renderLeaderboard,
     updateModeIndicator,
     updateFPSCounter,
     updateInventoryDisplay,

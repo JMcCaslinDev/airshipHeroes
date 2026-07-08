@@ -3,6 +3,11 @@
  */
 
 import { createElement, showElement, hideElement } from '../utils/domUtils.js';
+import {
+  computeShipPerformance,
+  formatPerformanceSummary,
+  formatSpeedMph
+} from '../physics/shipPerformance.js';
 
 /**
  * @param {Object} shipStorage
@@ -11,6 +16,7 @@ import { createElement, showElement, hideElement } from '../utils/domUtils.js';
  * @param {(username: string, slot: number) => void} callbacks.onDepart
  * @param {(username: string, slot: number, file: File) => Promise<void>} callbacks.onImportSlot
  * @param {(username: string, slot: number) => void} [callbacks.onExportSlot]
+ * @param {() => Array<{type: string}>|null} [callbacks.getEditingBlocks] live blocks while building
  */
 export function createShipyardUI(shipStorage, callbacks) {
   let shipyardScreen;
@@ -19,6 +25,7 @@ export function createShipyardUI(shipStorage, callbacks) {
   let departButton;
   let buildToolbar;
   let buildSlotLabel;
+  let buildPerfStats;
   let buildImportInput;
   let currentUsername = '';
   let selectedSlot = 0;
@@ -31,6 +38,7 @@ export function createShipyardUI(shipStorage, callbacks) {
     departButton = document.getElementById('shipyard-depart-btn');
     buildToolbar = document.getElementById('build-toolbar');
     buildSlotLabel = document.getElementById('build-slot-label');
+    buildPerfStats = document.getElementById('build-perf-stats');
     buildImportInput = document.getElementById('build-import-input');
 
     document.getElementById('shipyard-depart-btn')?.addEventListener('click', () => {
@@ -74,7 +82,7 @@ export function createShipyardUI(shipStorage, callbacks) {
   function getDisplaySlots(username) {
     const filled = shipStorage.listSlots(username).filter((slot) => !slot.empty);
     if (filled.length === 0) {
-      return [{ slot: 0, empty: true, name: 'New Ship', blockCount: 0 }];
+      return [{ slot: 0, empty: true, name: 'New Ship', blockCount: 0, performance: null }];
     }
     return filled;
   }
@@ -96,6 +104,13 @@ export function createShipyardUI(shipStorage, callbacks) {
       textContent: slotInfo.empty
         ? 'No design yet — click Edit to start'
         : `${slotInfo.blockCount} blocks`
+    });
+
+    const perfLine = createElement('p', {
+      className: 'ship-slot-perf',
+      textContent: slotInfo.empty || !slotInfo.performance
+        ? '—'
+        : formatPerformanceSummary(slotInfo.performance)
     });
 
     const actions = createElement('div', { className: 'ship-slot-actions' });
@@ -160,7 +175,7 @@ export function createShipyardUI(shipStorage, callbacks) {
     });
 
     actions.append(editBtn, exportBtn, importBtn, deleteBtn);
-    card.append(title, status, actions, fileInput);
+    card.append(title, status, perfLine, actions, fileInput);
     return card;
   }
 
@@ -206,6 +221,20 @@ export function createShipyardUI(shipStorage, callbacks) {
     departButton.disabled = !slotInfo || slotInfo.empty || slotInfo.blockCount === 0;
   }
 
+  function updateBuildPerfStats() {
+    if (!buildPerfStats) {
+      return;
+    }
+    const blocks = callbacks.getEditingBlocks?.() ?? null;
+    if (!blocks) {
+      buildPerfStats.textContent = '—';
+      return;
+    }
+    const perf = computeShipPerformance(blocks);
+    buildPerfStats.textContent =
+      `${perf.engines} eng · wt ${perf.weight} · max ${formatSpeedMph(perf.maxSpeed)} mph`;
+  }
+
   function show(username) {
     currentUsername = username;
     selectedSlot = shipStorage.getActiveSlot(username);
@@ -230,6 +259,7 @@ export function createShipyardUI(shipStorage, callbacks) {
     if (buildSlotLabel) {
       buildSlotLabel.textContent = `Editing ship ${slot + 1}`;
     }
+    updateBuildPerfStats();
     showElement(buildToolbar, 'flex');
   }
 
@@ -245,6 +275,7 @@ export function createShipyardUI(shipStorage, callbacks) {
     showBuildToolbar,
     hideBuildToolbar,
     refresh: renderSlots,
+    updateBuildPerfStats,
     getSelectedSlot: () => selectedSlot,
     getEditingSlot: () => editingSlot
   };

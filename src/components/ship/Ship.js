@@ -12,6 +12,11 @@ import ShipRenderer from './ShipRenderer.js';
 import ShipWeapons from './ShipWeapons.js';
 import ShipSerialization from './ShipSerialization.js';
 import { updateShipPhysics } from '../../physics/shipPhysics.js';
+import { updateShipEngineFlames } from '../../effects/shipEngineEffects.js';
+import { updateShipCombat, checkShipGroundCrash } from '../../combat/shipCombat.js';
+import { updateShipFires } from '../../combat/fireSystem.js';
+import { updateShipRedstone } from '../../combat/redstoneSystem.js';
+import { updateShipSinking } from '../../combat/sinkingSystem.js';
 
 class Ship {
   /**
@@ -27,7 +32,16 @@ class Ship {
     this.owner = options.owner || null; // Player who owns this ship
     this.name = options.name || 'Unnamed Ship';
     this.isSinking = false; // Whether the ship is currently sinking
-    this.sinkRate = 0.5;
+    this.sinkState = 'none';
+    this.sinkRate = 0.35;
+    this.health = 0;
+    this.maxHealth = 0;
+    this.healthPercent = 1;
+    this.isDestroyed = false;
+    this.lastDamagedBy = null;
+    this.killAwarded = false;
+    this.sinkingTiltAmount = 0;
+    this.sinkingStartTime = 0;
     this.controls = { forward: false, backward: false, left: false, right: false, up: false, down: false };
     this.worldManager = options.worldManager || null;
     
@@ -87,7 +101,7 @@ class Ship {
   }
 
   /**
-   * Check if the ship has enough lift blocks (at least 30% of total)
+   * Check if the ship has enough lift blocks (at least 25% of total)
    */
   checkLift() {
     this.blockManager.checkLift();
@@ -98,15 +112,19 @@ class Ship {
    */
   startSinking() {
     this.isSinking = true;
-    console.log(`Ship "${this.name}" is sinking!`);
+    if (!this.sinkingStartTime) {
+      this.sinkingStartTime = performance.now();
+    }
   }
 
-  /**
-   * Stop the ship sinking
-   */
   stopSinking() {
     this.isSinking = false;
-    console.log(`Ship "${this.name}" has regained lift!`);
+    this.sinkState = 'none';
+    this.sinkingStartTime = 0;
+    this.sinkingTiltAmount = 0;
+    if (this.group) {
+      this.group.rotation.x = 0;
+    }
   }
 
   /**
@@ -124,8 +142,29 @@ class Ship {
    * @param {number} deltaTime - The time since the last update in seconds
    * @param {number} worldHeight - The maximum height of the world
    */
-  update(deltaTime, worldHeight = 500) {
+  update(deltaTime, worldHeight = 500, combatContext = null) {
+    if (this.isDestroyed) {
+      return;
+    }
+
+    const scene = combatContext?.scene ?? window.renderer?.scene ?? null;
+
+    if (combatContext) {
+      updateShipFires(this, deltaTime, combatContext.onBlockBroken);
+      updateShipRedstone(this, combatContext.targets, deltaTime);
+      updateShipCombat(this, combatContext.targets, deltaTime, combatContext.hooks);
+    }
+
+    updateShipSinking(this, deltaTime, scene);
+
     updateShipPhysics(this, this.worldManager, deltaTime, worldHeight);
+
+    if (combatContext?.hooks && checkShipGroundCrash(this)) {
+      combatContext.hooks.onShipCrash?.(this);
+      return;
+    }
+
+    updateShipEngineFlames(this, deltaTime);
 
     // Update steering wheel's ship rotation if it exists
     if (this.steeringWheel) {

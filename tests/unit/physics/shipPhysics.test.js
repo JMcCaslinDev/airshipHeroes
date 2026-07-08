@@ -142,4 +142,74 @@ describe('Ship Physics', () => {
     expect(mockShip.velocity.y).toBeGreaterThan(0);
     expect(mockShip.velocity.y).toBeLessThan(1);
   });
+
+  test('sustained forward thrust approaches cruise max (half absolute)', () => {
+    mockShip.controls.forward = true;
+    for (let i = 0; i < 200; i++) {
+      updateShipPhysics(mockShip, mockWorldManager, 0.05);
+    }
+    const speed = Math.hypot(mockShip.velocity.x, mockShip.velocity.z);
+    expect(mockShip.cruiseMaxSpeed).toBeGreaterThan(0);
+    expect(speed).toBeGreaterThan(mockShip.cruiseMaxSpeed * 0.95);
+    expect(speed).toBeLessThanOrEqual(mockShip.cruiseMaxSpeed + 0.01);
+  });
+
+  test('boost unlocks upper half of max speed', () => {
+    mockShip.controls.forward = true;
+    mockShip.controls.boost = true;
+    // Stay within BOOST_DURATION (5s)
+    for (let i = 0; i < 80; i++) {
+      updateShipPhysics(mockShip, mockWorldManager, 0.05);
+    }
+    const speed = Math.hypot(mockShip.velocity.x, mockShip.velocity.z);
+    expect(mockShip.boostActive).toBe(true);
+    expect(speed).toBeGreaterThan(mockShip.cruiseMaxSpeed);
+    expect(speed).toBeLessThanOrEqual(mockShip.maxSpeed + 0.01);
+  });
+
+  test('boost doubles acceleration while active', () => {
+    const normal = makeMockShip();
+    const boosted = makeMockShip();
+    normal.controls.forward = true;
+    boosted.controls.forward = true;
+    boosted.controls.boost = true;
+
+    updateShipPhysics(normal, mockWorldManager, 0.2);
+    updateShipPhysics(boosted, mockWorldManager, 0.2);
+
+    const n = Math.hypot(normal.velocity.x, normal.velocity.z);
+    const b = Math.hypot(boosted.velocity.x, boosted.velocity.z);
+    expect(boosted.boostActive).toBe(true);
+    expect(b).toBeGreaterThan(n * 1.5);
+  });
+
+  test('coasting decelerates roughly 1 mph per second', () => {
+    const { SHIP_DECEL, SPEED_TO_MPH } = require('../../../src/physics/shipPerformance.js');
+    mockShip.velocity.z = 5;
+    mockShip.controls.forward = false;
+    updateShipPhysics(mockShip, mockWorldManager, 1);
+    const speed = Math.hypot(mockShip.velocity.x, mockShip.velocity.z);
+    expect(speed).toBeCloseTo(5 - SHIP_DECEL, 1);
+    expect(SHIP_DECEL * SPEED_TO_MPH).toBeCloseTo(1, 5);
+  });
+
+  test('after boost ends, speed bleeds down to cruise instead of snapping', () => {
+    mockShip.controls.forward = true;
+    mockShip.controls.boost = true;
+    for (let i = 0; i < 80; i++) {
+      updateShipPhysics(mockShip, mockWorldManager, 0.05);
+    }
+    const boosted = Math.hypot(mockShip.velocity.x, mockShip.velocity.z);
+    expect(boosted).toBeGreaterThan(mockShip.cruiseMaxSpeed);
+
+    mockShip.controls.boost = false;
+    mockShip.boostActive = false;
+    if (mockShip.boost) {
+      mockShip.boost.active = false;
+    }
+    updateShipPhysics(mockShip, mockWorldManager, 0.05);
+    const after = Math.hypot(mockShip.velocity.x, mockShip.velocity.z);
+    expect(after).toBeGreaterThan(mockShip.cruiseMaxSpeed);
+    expect(after).toBeLessThan(boosted);
+  });
 });

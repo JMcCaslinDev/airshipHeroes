@@ -7,6 +7,27 @@
 
 import * as THREE from 'three';
 import { attachBlockEdges } from './blockEdgeOutline.js';
+import {
+  createEngineFlameMesh,
+  updateEngineFlameMesh,
+  disposeEngineFlameMesh,
+  getFlameGridPosition
+} from '../effects/engineFlame.js';
+import { createRaptorEngineMaterials, createRaptorEngineGeometry, disposeRaptorEngineMaterials } from './engineTextures.js';
+import { BLOCK_MAX_HEALTH, FLAMMABLE_TYPES } from '../combat/shipCombatConfig.js';
+import { setBlockOnFire } from '../combat/fireSystem.js';
+
+/** Redstone dust sits on the floor of its grid cell (not the cell center). */
+export const REDSTONE_DUST_HEIGHT = 0.125;
+export const REDSTONE_MESH_Y_OFFSET = 0.5 - REDSTONE_DUST_HEIGHT / 2;
+
+export function getBlockMeshLocalPosition(block) {
+  const { x, y, z } = block.position;
+  if (block?.type === 'redstone') {
+    return { x, y: y - REDSTONE_MESH_Y_OFFSET, z };
+  }
+  return { x, y, z };
+}
 
 class BlockFactory {
   /**
@@ -19,120 +40,141 @@ class BlockFactory {
   static createBlock(type, position, options = {}) {
     // Normalize the type to lowercase
     const normalizedType = type.toLowerCase();
+    const maxHealth = BLOCK_MAX_HEALTH[normalizedType] ?? 10;
     
     // Create a generic block with the specified type
     const block = {
       type: normalizedType,
       position: { ...position },
-      health: options.health || 100,
+      health: options.health ?? maxHealth,
+      maxHealth,
+      isFlammable: FLAMMABLE_TYPES.has(normalizedType),
+      isBurning: false,
+      burnTimer: 0,
+      spreadTimer: 0,
+      dispenserCooldown: 0,
       rotation: options.rotation || 0,
       mesh: null,
+
+      setOnFire() {
+        return setBlockOnFire(this);
+      },
+
+      takeDamage(amount) {
+        this.health -= amount;
+        if (this.health <= 0) {
+          this.isDestroyed = true;
+          if (this.mesh?.parent) {
+            this.mesh.parent.remove(this.mesh);
+          }
+          return true;
+        }
+        const ratio = this.health / this.maxHealth;
+        if (this.mesh?.material?.color) {
+          this.mesh.material.color.setRGB(ratio, ratio * 0.85, ratio * 0.85);
+        }
+        return false;
+      },
       
       // For engine blocks, add direction and thrust-related properties
       ...(normalizedType === 'engine' ? {
-        direction: options.direction || { x: 0, y: 0, z: -1 }, // Default direction (forward)
-        isActive: false,
+        direction: options.direction || { x: 0, y: 0, z: -1 },
+        flameMesh: null,
         thrustPower: options.thrustPower || 1,
-        
-        // Set engine active state
-        setActive(active) {
-          this.isActive = active;
-        },
-        
-        // Calculate thrust provided by this engine
-        calculateThrust() {
-          if (!this.isActive) {
-            return { x: 0, y: 0, z: 0 };
+
+        setFlameActive(active) {
+          if (this.flameMesh) {
+            this.flameMesh.visible = !!active;
           }
-          
-          return {
-            x: this.direction.x * this.thrustPower,
-            y: this.direction.y * this.thrustPower,
-            z: this.direction.z * this.thrustPower
-          };
-        }
+        },
+
+        updateFlame(deltaTime) {
+          if (this.flameMesh?.visible) {
+            updateEngineFlameMesh(this.flameMesh, deltaTime);
+          }
+        },
+
+        disposeFlame() {
+          disposeEngineFlameMesh(this.flameMesh);
+          this.flameMesh = null;
+        },
+
+        attachFlame(group) {
+          if (!group || !this.direction || this.flameMesh) {
+            return;
+          }
+          this.flameMesh = createEngineFlameMesh(this.direction);
+          const flamePos = getFlameGridPosition(this.position, this.direction);
+          this.flameMesh.position.set(flamePos.x, flamePos.y, flamePos.z);
+          group.add(this.flameMesh);
+        },
+
+        disposeEngineMaterials() {
+          if (this.engineMaterials) {
+            disposeRaptorEngineMaterials(this.engineMaterials);
+            this.engineMaterials = null;
+          }
+        },
       } : {}),
       
       // Create mesh for the block
       createMesh(group, textureLoader) {
-        // Create geometry
-        const geometry = new THREE.BoxGeometry(1, 1, 1);
-        
-        // Get texture for the block type
-        let texture;
-        try {
-          if (textureLoader && typeof textureLoader.get === 'function') {
-            texture = textureLoader.get(this.type);
-            console.log(`Successfully loaded texture for block type: ${this.type}`);
-          } else {
-            console.warn(`TextureLoader not available or missing get method for block type: ${this.type}`);
-          }
-        } catch (error) {
-          console.error(`Failed to load texture for block type: ${this.type}`, error);
-        }
-        
-        // Create material
+        const isRedstoneDust = this.type === 'redstone';
+        let geometry = isRedstoneDust
+          ? new THREE.BoxGeometry(1, REDSTONE_DUST_HEIGHT, 1)
+          : new THREE.BoxGeometry(1, 1, 1);
         let material;
-        if (texture) {
-          material = new THREE.MeshStandardMaterial({ 
-            map: texture,
-            // Add these properties to improve texture appearance
-            roughness: 0.7,
-            metalness: 0.2
-          });
+
+        if (this.type === 'engine') {
+          geometry = createRaptorEngineGeometry();
+          this.engineMaterials = createRaptorEngineMaterials();
+          material = this.engineMaterials[0];
         } else {
-          // Use default color if texture loading failed
-          const color = this.getDefaultColor();
-          console.warn(`Using default color ${color.toString(16)} for block type: ${this.type}`);
-          material = new THREE.MeshStandardMaterial({ 
-            color: color,
-            roughness: 0.7,
-            metalness: 0.2
-          });
+          let texture;
+          try {
+            if (textureLoader && typeof textureLoader.get === 'function') {
+              texture = textureLoader.get(this.type);
+            }
+          } catch (error) {
+            console.error(`Failed to load texture for block type: ${this.type}`, error);
+          }
+
+          if (texture) {
+            material = new THREE.MeshStandardMaterial({
+              map: texture,
+              roughness: isRedstoneDust ? 0.9 : 0.7,
+              metalness: isRedstoneDust ? 0.05 : 0.2,
+              ...(isRedstoneDust ? { emissive: 0x000000, emissiveIntensity: 0 } : {})
+            });
+          } else {
+            material = new THREE.MeshStandardMaterial({
+              color: this.getDefaultColor(),
+              roughness: 0.7,
+              metalness: 0.2
+            });
+          }
         }
-        
-        // Create mesh
+
         this.mesh = new THREE.Mesh(geometry, material);
-        attachBlockEdges(this.mesh);
-        
-        // Set position
-        this.mesh.position.set(this.position.x, this.position.y, this.position.z);
-        
-        // Set rotation if specified
-        if (this.rotation) {
+        if (this.type !== 'engine' && !isRedstoneDust) {
+          attachBlockEdges(this.mesh);
+        }
+
+        const meshPos = getBlockMeshLocalPosition(this);
+        this.mesh.position.set(meshPos.x, meshPos.y, meshPos.z);
+
+        if (this.type === 'engine' && this.direction) {
+          const dir = new THREE.Vector3(this.direction.x, this.direction.y, this.direction.z);
+          if (dir.lengthSq() > 0.001) {
+            dir.normalize();
+            this.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), dir);
+          }
+        } else if (this.rotation) {
           this.mesh.rotation.y = this.rotation;
         }
-        
-        // For engine blocks, add a visual indicator of direction
-        if (this.type === 'engine' && this.direction) {
-          // Add a small cone to indicate thrust direction
-          const coneGeometry = new THREE.ConeGeometry(0.2, 0.4, 8);
-          const coneMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000 }); // Red
-          const cone = new THREE.Mesh(coneGeometry, coneMaterial);
-          
-          // Position the cone based on the engine direction
-          cone.position.set(
-            this.direction.x * 0.7,
-            this.direction.y * 0.7,
-            this.direction.z * 0.7
-          );
-          
-          // Rotate the cone to point in the direction of thrust
-          if (this.direction.z === -1) {
-            // Forward
-            cone.rotation.x = Math.PI;
-          } else if (this.direction.z === 1) {
-            // Backward
-            // No rotation needed, default cone points up
-          } else if (this.direction.x === 1) {
-            // Right
-            cone.rotation.z = -Math.PI / 2;
-          } else if (this.direction.x === -1) {
-            // Left
-            cone.rotation.z = Math.PI / 2;
-          }
-          
-          this.mesh.add(cone);
+
+        if (this.type === 'engine' && this.direction && group) {
+          this.attachFlame(group);
         }
         
         this.mesh.castShadow = true;
@@ -188,7 +230,9 @@ class BlockFactory {
           case 'armor': return 0x985E2D;
           case 'cannon': return 0x7F7F7F;
           case 'control': return 0x6B4423;
-          case 'engine': return 0x444444;
+          case 'engine': return 0x1c1c20;
+          case 'dispenser': return 0x6e6e6e;
+          case 'redstone': return 0xb83232;
           default: return 0xAAAAAA;
         }
       },
@@ -330,8 +374,11 @@ class BlockFactory {
    * @returns {Boolean} - Whether the ship has enough lift blocks
    */
   static hasEnoughLift(blocks) {
-    const counts = this.countBlockTypes(blocks);
-    return counts.lift >= counts.total * 0.3;
+    if (!blocks || blocks.length === 0) {
+      return false;
+    }
+    const liftCount = blocks.filter((block) => block.type === 'lift').length;
+    return liftCount / blocks.length >= 0.25;
   }
 }
 

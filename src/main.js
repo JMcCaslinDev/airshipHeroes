@@ -20,10 +20,38 @@ import { createShipyardUI } from './ui/shipyardUI.js';
 import Player from './components/player.js';
 import Ship from './components/ship.js';
 import Projectile from './weapons/projectile.js';
-import { createExplosion, applyExplosionDamage } from './weapons/explosion.js';
+import { createExplosion } from './weapons/explosion.js';
 import { createShipStorage } from './core/shipStorage.js';
 import { createWorldManager } from './core/worldManager.js';
+import { generateGroundLandscape } from './world/groundLandscape.js';
+import { spawnArenaBots, respawnArenaBot } from './ai/arenaBots.js';
 import BlockFactory from './blocks/blockFactory.js';
+import { syncControlBlocks } from './blocks/controlBlockRules.js';
+import { destroyShipAt, respawnPlayer } from './combat/arenaLifecycle.js';
+import { getControlBlockFeetWorld } from './physics/shipLocalCollision.js';
+import {
+  damageShipBlock,
+  recalculateShipHealth
+} from './combat/shipCombat.js';
+import { updateArenaShipCollisions } from './physics/shipCollision.js';
+import { getLeaderboard } from './combat/leaderboard.js';
+import { clearShipSinkEffects } from './combat/sinkingSystem.js';
+import { setBlockOnFire } from './combat/fireSystem.js';
+import { DEATH_SPECTATE_SECONDS, SPECTATOR_HEIGHT } from './combat/shipCombatConfig.js';
+import { creditShipDamage, resetShipCombatCredit } from './combat/damageAttribution.js';
+import { setKillFeedHandler, resetKillStreaks } from './combat/killFeed.js';
+import { pickArenaSpawn, applySpawnToShip } from './combat/spawnPlacement.js';
+import {
+  createSpawnIntro,
+  updateSpawnIntro,
+  isSpawnIntroActive,
+  isSpawnIntroLocked,
+  isSpawnBoostActive,
+  syncSpawnIntroPlayer,
+  endSpawnIntro,
+  shipTravelLookYaw
+} from './combat/spawnIntro.js';
+import { registerCannonProjectile } from './combat/registerProjectile.js';
 
 // Create game objects
 const renderer = createRenderer();
@@ -43,17 +71,17 @@ const inputHandler = createInputHandler({
   onMouseMove: (deltaX, deltaY) => {
     if (gameState.mode === 'ship' && shipModeController) {
       shipModeController.handleMouseMove(deltaX, deltaY);
-    } else if (gameState.mode === 'player' && playerModeController) {
+    } else if (gameState.mode === 'player' && playerModeController && !isSpawnIntroLocked(spawnIntro)) {
       playerModeController.handleMouseMove(deltaX, deltaY);
     }
   },
   onMouseDown: (event) => {
-    if (gameState.mode === 'player' && playerModeController) {
+    if (gameState.mode === 'player' && playerModeController && !isSpawnIntroLocked(spawnIntro)) {
       playerModeController.handleMouseDown(event);
     }
   },
   onMouseUp: (event) => {
-    if (gameState.mode === 'player' && playerModeController?.handleMouseUp) {
+    if (gameState.mode === 'player' && playerModeController?.handleMouseUp && !isSpawnIntroLocked(spawnIntro)) {
       playerModeController.handleMouseUp(event);
     }
   },
@@ -69,6 +97,7 @@ const resourceLoader = createResourceLoader({
   onComplete: onResourcesLoaded
 });
 const uiManager = createUIManager(gameState, handleLogin);
+setKillFeedHandler((event) => uiManager.showKillFeed(event));
 
 // Multiplayer client will be created after entering the arena
 let multiplayerClient = null;
@@ -87,18 +116,22 @@ let pointerLock = null;
 
 // Track toggle key state to prevent multiple toggles per press
 let lastToggleState = false;
+let deathSpectate = null;
+let spawnIntro = null;
 
 // Initialize ship storage
 const shipStorage = createShipStorage();
 
 // Initialize world manager
 const worldManager = createWorldManager();
+let groundLandscape = null;
 
 shipyardUI = createShipyardUI(shipStorage, {
   onEditSlot: enterShipyardBuild,
   onDepart: departToArena,
   onImportSlot: importShipSlot,
-  onExportSlot: exportShipSlot
+  onExportSlot: exportShipSlot,
+  getEditingBlocks: () => gameState.localPlayer?.ship?.blockManager?.blocks ?? null
 });
 
 document.addEventListener('shipyardSave', () => {
@@ -236,8 +269,14 @@ function onResourcesLoaded() {
     console.log('Login screen shown directly');
   }
   
-  // Create ground
-  renderer.createGround();
+  // Voxel ground to fly over
+  worldManager.init(renderer.scene);
+  if (!groundLandscape) {
+    groundLandscape = generateGroundLandscape({
+      getTexture: (name) => resourceLoader.getTexture(name)
+    });
+    renderer.scene.add(groundLandscape.group);
+  }
   
   // Create skybox
   renderer.createSkybox();
@@ -475,6 +514,7 @@ function startGame(username, slot = shipStorage.getActiveSlot(username)) {
     console.log(`Departing to arena for ${username} with slot ${slot}...`);
     gamePhase = 'arena';
     gameState.phase = 'arena';
+    resetKillStreaks();
     shipyardUI.hide();
     shipyardUI.hideBuildToolbar();
 
@@ -518,6 +558,9 @@ function startGame(username, slot = shipStorage.getActiveSlot(username)) {
       console.log('Loading default ship for arena deployment');
       loadDefaultShip(localPlayer);
     }
+
+    spawnArenaBots(gameState, { loadShipForPlayer, resourceLoader });
+    console.log('Arena AI ships spawned');
     
     // Add debug helpers to scene
     if (gameState.ui.showDebug) {
@@ -528,11 +571,7 @@ function startGame(username, slot = shipStorage.getActiveSlot(username)) {
     // Capture mouse on canvas for ship + player modes
     ensureModeControllers(localPlayer);
     
-    // Start in ship mode for arena combat
-    gameState.mode = 'ship';
-    playerModeController.deactivate();
-    shipModeController.activate();
-    console.log('Ship mode activated for arena');
+    beginArenaDeploy(localPlayer);
     
     pointerLock?.request();
     
@@ -581,6 +620,7 @@ function startGame(username, slot = shipStorage.getActiveSlot(username)) {
     
     // Show HUD
     uiManager.showHUD();
+    uiManager.setRespawnCallback(finishDeathSpectate);
     console.log('HUD shown');
     
     // Start game loop
@@ -675,8 +715,22 @@ function replacePlayerShip(player, ship) {
 
   player.ship = ship;
   ship.worldManager = worldManager;
+  wireShipCombatHelpers(ship, player);
   ensureShipInScene(ship);
   return ship;
+}
+
+function wireShipCombatHelpers(ship, player) {
+  if (!ship) {
+    return;
+  }
+  resetShipCombatCredit(ship);
+  ship.registerCannonShot = (cannonMesh, scene) => registerCannonProjectile(
+    cannonMesh,
+    player,
+    scene,
+    handleProjectileExplode
+  );
 }
 
 /**
@@ -722,6 +776,8 @@ function loadShipForPlayer(player, shipDefinition) {
     
     // Ensure the ship is visible and in the scene
     ensureShipInScene(ship);
+    
+    recalculateShipHealth(ship);
     
     // Set the ship for the player
     replacePlayerShip(player, ship);
@@ -892,11 +948,6 @@ function createFallbackShip(player) {
           // Add the block to the ship using the blockManager
           ship.blockManager.addBlock(block, resourceLoader);
           
-          // If it's a steering wheel or control block, store a reference
-          if (blockData.type === 'control' || blockData.type === 'steeringWheel') {
-            ship.steeringWheel = block;
-          }
-          
           // Verify the block has a mesh
           if (!block.mesh) {
             console.error(`Block of type ${blockData.type} has no mesh after adding to ship`);
@@ -908,6 +959,8 @@ function createFallbackShip(player) {
         console.error(`Error creating ${blockData.type} block:`, blockError);
       }
     }
+
+    syncControlBlocks(ship);
     
     // Check if we successfully created any blocks
     if (ship.blockManager.blocks.length === 0) {
@@ -1044,7 +1097,7 @@ function handleProjectileFired(data) {
     velocity: data.velocity,
     fuseTimer: data.fuseTimer,
     owner: gameState.players[data.username],
-    onExplode: handleProjectileExplode
+    onExplode: (pos, dmg, owner) => handleProjectileExplode(pos, dmg, owner)
   });
   
   // Create mesh
@@ -1059,29 +1112,227 @@ function handleProjectileFired(data) {
  * @param {Object} position - The position of the explosion
  * @param {Number} damage - The damage amount
  */
-function handleProjectileExplode(position, damage) {
-  // Create explosion
+function handleProjectileExplode(position, damage, owner) {
   const explosion = createExplosion(renderer.scene, position, {
     radius: 3,
     damage: damage
   });
   
-  // Add to game state
   gameState.addExplosion(explosion);
-  
-  // Apply damage to nearby blocks
-  for (const player of Object.values(gameState.players)) {
-    if (player.ship) {
-      applyExplosionDamage(explosion, player.ship.blockManager.blocks);
+  applyExplosionToShips(explosion, owner ?? null);
+}
+
+/**
+ * Arena players as an array (gameState.players is a Map).
+ */
+function getArenaPlayers() {
+  return Array.from(gameState.players.values());
+}
+
+function applyExplosionToShips(explosion, attacker) {
+  if (!explosion?.isActive) {
+    return;
+  }
+
+  for (const player of getArenaPlayers()) {
+    const ship = player.ship;
+    if (!ship || ship.isDestroyed) {
+      continue;
+    }
+
+    for (const block of [...ship.blockManager.blocks]) {
+      const wp = ship.getBlockWorldPosition(block);
+      const dist = Math.hypot(
+        wp.x - explosion.position.x,
+        wp.y - explosion.position.y,
+        wp.z - explosion.position.z
+      );
+      if (dist <= explosion.radius) {
+        const damage = explosion.damage * (1 - dist / explosion.radius);
+        if (attacker) {
+          creditShipDamage(ship, attacker);
+        }
+        damageShipBlock(ship, block, damage, null, attacker);
+        if (block.isFlammable) {
+          setBlockOnFire(block);
+        }
+      }
     }
   }
+}
+
+function buildArenaCombatContext() {
+  return {
+    scene: renderer.scene,
+    targets: getArenaPlayers().filter((p) => p.ship && !p.ship.isDestroyed),
+    onBlockBroken: () => {},
+    hooks: {
+      onShipCrash: handleShipCrash,
+      onKillMessage: (msg) => uiManager.appendChatMessage(msg),
+      onCombatMessage: (msg) => uiManager.appendChatMessage(msg)
+    }
+  };
+}
+
+function handleShipCrash(ship) {
+  destroyShipAt(ship, renderer.scene, gameState, {
+    onKillMessage: (msg) => uiManager.appendChatMessage(msg),
+    onCombatMessage: (msg) => uiManager.appendChatMessage(msg),
+    onShipExplosion: (explosion, attacker) => {
+      gameState.addExplosion(explosion);
+      applyExplosionToShips(explosion, attacker);
+    },
+    onLocalDeath: (victim, killer) => beginDeathSpectate(victim, killer),
+    onBotDeath: (bot) => {
+      setTimeout(() => {
+        respawnArenaBot(bot, { gameState, loadShipForPlayer, resourceLoader });
+      }, 8000);
+    }
+  });
+}
+
+function deployPlayerAtArenaSpawn(player) {
+  if (!player?.ship) {
+    return pickArenaSpawn();
+  }
+
+  const spawn = pickArenaSpawn();
+  applySpawnToShip(player.ship, spawn);
+  resetShipCombatCredit(player.ship);
+  return spawn;
+}
+
+function beginArenaDeploy(player) {
+  deployPlayerAtArenaSpawn(player);
+  // Start in ship mode so Steve is visible on deck from the first frame
+  gameState.mode = 'ship';
+  player.mode = 'ship';
+  playerModeController?.deactivate();
+  shipModeController?.activate();
+
+  const feet = getControlBlockFeetWorld(player.ship);
+  if (feet && player.character) {
+    player.character.position.x = feet.x;
+    player.character.position.y = feet.y;
+    player.character.position.z = feet.z;
+    player.character.showShipModeOutline?.(feet, player.ship);
+  }
+
+  spawnIntro = createSpawnIntro(player, player.ship, () => finishSpawnIntroDeployment(player));
+  // Seed orbit at intro start (side view) — syncSpawnIntroPlayer eases toward heading
+  shipModeController?.setOrbitAngles?.(
+    spawnIntro.cameraPitch,
+    spawnIntro.cameraYaw
+  );
+}
+
+function finishSpawnIntroDeployment(player) {
+  // Intro lock done — drop into first-person on the deck, looking along travel
+  const lookYaw = shipTravelLookYaw(player.ship?.rotation ?? 0);
+  shipModeController?.deactivate();
+  gameState.mode = 'player';
+  player.mode = 'player';
+  if (playerModeController) {
+    playerModeController.cameraView = 'first';
+    playerModeController.activate();
+    playerModeController.setCameraAngles?.(0, lookYaw);
+  }
+  if (player.character) {
+    player.character.rotation = lookYaw;
+    player.character.setViewMode?.('first');
+  }
+  uiManager?.updateModeIndicator?.();
+}
+
+function beginSpawnIntro(player) {
+  if (!player?.ship) {
+    return;
+  }
+  deployPlayerAtArenaSpawn(player);
+  endSpawnIntro(spawnIntro);
+  beginArenaDeploy(player);
+  pointerLock?.request();
+}
+
+function reloadPlayerShip(player) {
+  if (!player) {
+    return;
+  }
+
+  const slot = player.activeShipSlot ?? shipStorage.getActiveSlot(player.username);
+  const savedShip = shipStorage.loadShip(player.username, slot);
+  const spawn = pickArenaSpawn();
+
+  if (savedShip?.blocks?.length) {
+    savedShip.position = { ...spawn.position };
+    savedShip.rotation = spawn.rotation;
+    loadShipForPlayer(player, savedShip);
+  } else {
+    loadDefaultShip(player);
+  }
+
+  if (player.ship) {
+    applySpawnToShip(player.ship, spawn);
+    player.ship.isDestroyed = false;
+    player.ship.sinkState = 'none';
+    player.ship.isSinking = false;
+    resetShipCombatCredit(player.ship);
+    recalculateShipHealth(player.ship);
+    clearShipSinkEffects(player.ship, renderer.scene);
+  }
+}
+
+function beginDeathSpectate(victim, killer) {
+  endSpawnIntro(spawnIntro);
+  spawnIntro = null;
+  deathSpectate = { remaining: DEATH_SPECTATE_SECONDS, victim, killer };
+  pointerLock?.exit?.();
+  shipModeController?.deactivate();
+  playerModeController?.deactivate();
+  uiManager.hideHUD();
+  uiManager.showDeathScreen({
+    killerName: killer?.username,
+    victimName: victim?.username,
+    countdown: DEATH_SPECTATE_SECONDS,
+    leaderboard: getLeaderboard()
+  });
+}
+
+function finishDeathSpectate() {
+  const victim = deathSpectate?.victim ?? gameState.localPlayer;
+  deathSpectate = null;
+
+  respawnPlayer(victim, {
+    reloadShip: reloadPlayerShip
+  });
+
+  uiManager.hideDeathScreen();
+  uiManager.showHUD();
+  beginSpawnIntro(victim);
+}
+
+function updateDeathSpectate(deltaTime) {
+  if (!deathSpectate) {
+    return false;
+  }
+
+  deathSpectate.remaining -= deltaTime;
+  uiManager.updateDeathCountdown(Math.ceil(Math.max(0, deathSpectate.remaining)));
+
+  renderer.camera.position.set(0, SPECTATOR_HEIGHT, 0.1);
+  renderer.camera.lookAt(0, 0, 0);
+
+  if (deathSpectate.remaining <= 0) {
+    finishDeathSpectate();
+  }
+  return true;
 }
 
 /**
  * Toggle between Ship Mode and Player Mode
  */
 function toggleMode() {
-  if (gamePhase === 'build') {
+  if (gamePhase === 'build' || isSpawnIntroLocked(spawnIntro)) {
     return;
   }
 
@@ -1127,6 +1378,42 @@ function updateFPS(fps) {
  */
 function update(deltaTime) {
   try {
+    if (gamePhase === 'build') {
+      shipyardUI?.updateBuildPerfStats?.();
+    }
+
+    if (updateDeathSpectate(deltaTime)) {
+      try {
+        uiManager.update();
+      } catch (error) {
+        console.error('Error updating UI:', error);
+      }
+      return;
+    }
+
+    if (isSpawnIntroLocked(spawnIntro)) {
+      try {
+        gameState.update(deltaTime);
+        if (gameState.localPlayer) {
+          gameState.localPlayer.update(deltaTime, renderer.scene);
+        }
+        updateSpawnIntro(spawnIntro, deltaTime, inputHandler.keys);
+        syncSpawnIntroPlayer(spawnIntro, shipModeController);
+        shipModeController?.update?.();
+        uiManager.update();
+      } catch (error) {
+        console.error('Error during spawn intro:', error);
+      }
+      return;
+    }
+
+    if (gamePhase === 'arena') {
+      gameState.arenaCombatContext = buildArenaCombatContext();
+      updateArenaShipCollisions(getArenaPlayers());
+    } else {
+      gameState.arenaCombatContext = null;
+    }
+
     // Update game state
     try {
       gameState.update(deltaTime);
@@ -1168,11 +1455,21 @@ function update(deltaTime) {
         console.error('Error updating mode controller:', error);
       }
       
-      // Update player
+      // Update player (runs ship physics)
       try {
         gameState.localPlayer.update(deltaTime, renderer.scene);
       } catch (error) {
         console.error('Error updating player:', error);
+      }
+
+      // Re-stick player to ship-local feet after the hull moved
+      if (gameState.mode === 'player') {
+        playerModeController?.syncToShipAfterPhysics?.();
+      }
+
+      // Keep spawn cruise after unlock until player press+release thrust
+      if (isSpawnBoostActive(spawnIntro)) {
+        updateSpawnIntro(spawnIntro, deltaTime, inputHandler.keys);
       }
     }
     
