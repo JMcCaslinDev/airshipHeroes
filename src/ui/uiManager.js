@@ -306,11 +306,11 @@ export function createUIManager(gameState, loginCallback) {
     const mode = gameState.localPlayer.mode;
     
     if (mode === 'ship') {
-      modeIndicator.textContent = 'Ship Mode';
-      modeIndicator.style.color = '#00ccff';
+      modeIndicator.textContent = gameState.phase === 'build' ? 'Shipyard Build' : 'Ship Mode';
+      modeIndicator.style.color = gameState.phase === 'build' ? '#66ff99' : '#00ccff';
       document.body.classList.remove('player-mode');
     } else if (mode === 'player') {
-      modeIndicator.textContent = 'Player Mode';
+      modeIndicator.textContent = gameState.phase === 'build' ? 'Shipyard Build' : 'Player Mode';
       modeIndicator.style.color = '#ffcc00';
       document.body.classList.add('player-mode');
     }

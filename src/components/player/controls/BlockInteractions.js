@@ -448,7 +448,11 @@ class BlockInteractions {
     if (this.player.shipStorage && this.player.username) {
       try {
         const shipDefinition = this.player.ship.serialize();
-        this.player.shipStorage.saveShip(this.player.username, shipDefinition);
+        this.player.shipStorage.saveShip(
+          this.player.username,
+          shipDefinition,
+          this.player.activeShipSlot
+        );
         console.log("Ship saved to localStorage");
       } catch (error) {
         console.error("Error saving ship to localStorage:", error);

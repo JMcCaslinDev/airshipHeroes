@@ -112,6 +112,126 @@ body {
   border-color: #ffcc00;
 }
 
+/* Shipyard Screen */
+.shipyard-container {
+  text-align: center;
+  padding: 2rem;
+  background-color: rgba(30, 30, 30, 0.9);
+  border-radius: 10px;
+  width: 90%;
+  max-width: 900px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.shipyard-container h1 {
+  margin-bottom: 0.5rem;
+  color: #00ccff;
+  font-size: 2.5rem;
+}
+
+.shipyard-subtitle {
+  margin-bottom: 1.5rem;
+  color: #ccc;
+}
+
+.ship-slot-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  text-align: left;
+  justify-content: center;
+  align-items: stretch;
+}
+
+.new-ship-button {
+  min-width: 140px;
+  min-height: 120px;
+  align-self: stretch;
+}
+
+.ship-slot-card {
+  background-color: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.ship-slot-card.selected {
+  border-color: #00ccff;
+  box-shadow: 0 0 0 1px #00ccff;
+}
+
+.ship-slot-card h3 {
+  color: #ffcc00;
+  margin-bottom: 0.5rem;
+}
+
+.ship-slot-status {
+  font-size: 0.9rem;
+  color: #bbb;
+  margin-bottom: 0.75rem;
+  min-height: 2.5rem;
+}
+
+.ship-slot-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.shipyard-footer {
+  margin-top: 0.5rem;
+}
+
+.secondary-button {
+  background-color: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  padding: 0.45rem 0.7rem;
+  font-size: 0.85rem;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.secondary-button:hover {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+.danger-button {
+  background-color: rgba(255, 60, 60, 0.25);
+  color: #ffb3b3;
+  border: 1px solid rgba(255, 100, 100, 0.5);
+  padding: 0.45rem 0.7rem;
+  font-size: 0.85rem;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.build-toolbar {
+  position: absolute;
+  top: 70px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.75);
+  padding: 0.6rem 0.8rem;
+  border-radius: 8px;
+  pointer-events: auto;
+}
+
+.build-slot-label {
+  color: #00ccff;
+  font-weight: bold;
+  margin-right: 0.25rem;
+}
+
 /* Death Screen */
 .death-container {
   text-align: center;

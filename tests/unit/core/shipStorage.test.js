@@ -62,12 +62,11 @@ describe('ShipStorage', () => {
       // Assert
       expect(result).toBe(true);
       expect(global.localStorage.setItem).toHaveBeenCalledWith(
-        `airshipHeroes_ship_${username}`,
+        `airshipHeroes_ship_${username}_0`,
         expect.any(String)
       );
       
       // Verify the saved data
-      const key = `airshipHeroes_ship_${username}`;
       const savedDataString = global.localStorage.setItem.mock.calls[0][1];
       const savedData = JSON.parse(savedDataString);
       expect(savedData).toEqual(shipDefinition);
@@ -90,7 +89,7 @@ describe('ShipStorage', () => {
   describe('loadShip', () => {
     test('should load a ship from localStorage', () => {
       // Arrange
-      const key = `airshipHeroes_ship_${username}`;
+      const key = `airshipHeroes_ship_${username}_0`;
       mockStorage[key] = JSON.stringify(shipDefinition);
       
       // Act
@@ -107,7 +106,7 @@ describe('ShipStorage', () => {
       
       // Assert
       expect(result).toBeNull();
-      expect(global.localStorage.getItem).toHaveBeenCalledWith(`airshipHeroes_ship_${username}`);
+      expect(global.localStorage.getItem).toHaveBeenCalledWith(`airshipHeroes_ship_${username}_0`);
     });
     
     test('should return null if an error occurs', () => {
@@ -127,7 +126,7 @@ describe('ShipStorage', () => {
   describe('shipExists', () => {
     test('should return true if a ship exists', () => {
       // Arrange
-      const key = `airshipHeroes_ship_${username}`;
+      const key = `airshipHeroes_ship_${username}_0`;
       mockStorage[key] = JSON.stringify(shipDefinition);
       
       // Act
@@ -144,14 +143,14 @@ describe('ShipStorage', () => {
       
       // Assert
       expect(result).toBe(false);
-      expect(global.localStorage.getItem).toHaveBeenCalledWith(`airshipHeroes_ship_${username}`);
+      expect(global.localStorage.getItem).toHaveBeenCalledWith(`airshipHeroes_ship_${username}_0`);
     });
   });
   
   describe('deleteShip', () => {
     test('should delete a ship from localStorage', () => {
       // Arrange
-      const key = `airshipHeroes_ship_${username}`;
+      const key = `airshipHeroes_ship_${username}_0`;
       mockStorage[key] = JSON.stringify(shipDefinition);
       
       // Act
@@ -206,6 +205,42 @@ describe('ShipStorage', () => {
       
       // Verify the ship no longer exists
       expect(shipStorage.shipExists(username)).toBe(false);
+    });
+  });
+
+  describe('multi-slot storage', () => {
+    test('should store up to five independent slots', () => {
+      const slotTwo = { ...shipDefinition, name: 'Slot Two' };
+      shipStorage.saveShip(username, shipDefinition, 0);
+      shipStorage.saveShip(username, slotTwo, 2);
+
+      expect(shipStorage.loadShip(username, 0)).toEqual(shipDefinition);
+      expect(shipStorage.loadShip(username, 2)).toEqual(slotTwo);
+      expect(shipStorage.loadShip(username, 1)).toBeNull();
+    });
+
+    test('should migrate legacy single-ship saves into slot 0', () => {
+      mockStorage[`airshipHeroes_ship_${username}`] = JSON.stringify(shipDefinition);
+
+      expect(shipStorage.loadShip(username, 0)).toEqual(shipDefinition);
+      expect(mockStorage[`airshipHeroes_ship_${username}`]).toBeUndefined();
+    });
+
+    test('listSlots should summarize all five slots', () => {
+      shipStorage.saveShip(username, shipDefinition, 0);
+      const slots = shipStorage.listSlots(username);
+
+      expect(slots).toHaveLength(5);
+      expect(slots[0].empty).toBe(false);
+      expect(slots[0].blockCount).toBe(3);
+      expect(slots[1].empty).toBe(true);
+    });
+
+    test('findFirstEmptySlot should skip filled slots', () => {
+      shipStorage.saveShip(username, shipDefinition, 0);
+      shipStorage.saveShip(username, { ...shipDefinition, name: 'Two' }, 2);
+
+      expect(shipStorage.findFirstEmptySlot(username)).toBe(1);
     });
   });
 }); 

@@ -4,30 +4,12 @@
  * Tests for the ship persistence functionality, including saving and loading ships.
  */
 
+import { jest } from '@jest/globals';
 import { createShipStorage } from '../../../src/core/shipStorage.js';
-
-// Mock localStorage
-const localStorageMock = (() => {
-  let store = {};
-  return {
-    getItem: jest.fn(key => store[key] || null),
-    setItem: jest.fn((key, value) => {
-      store[key] = value.toString();
-    }),
-    removeItem: jest.fn(key => {
-      delete store[key];
-    }),
-    clear: jest.fn(() => {
-      store = {};
-    })
-  };
-})();
-
-// Save original localStorage
-const originalLocalStorage = global.localStorage;
 
 describe('Ship Persistence', () => {
   let shipStorage;
+  let mockStorage = {};
   const username = 'testPlayer';
   const shipDefinition = {
     name: 'Test Ship',
@@ -40,19 +22,25 @@ describe('Ship Persistence', () => {
   };
   
   beforeEach(() => {
-    // Set up mock
-    global.localStorage = localStorageMock;
+    mockStorage = {};
+    Object.defineProperty(global, 'localStorage', {
+      value: {
+        getItem: jest.fn(key => mockStorage[key] || null),
+        setItem: jest.fn((key, value) => {
+          mockStorage[key] = value;
+        }),
+        removeItem: jest.fn(key => {
+          delete mockStorage[key];
+        }),
+        clear: jest.fn(() => {
+          mockStorage = {};
+        })
+      },
+      writable: true
+    });
     
-    // Reset mock functions
     jest.clearAllMocks();
-    
-    // Create a new ship storage for each test
     shipStorage = createShipStorage();
-  });
-  
-  afterEach(() => {
-    // Restore original localStorage
-    global.localStorage = originalLocalStorage;
   });
   
   describe('saveShip', () => {
@@ -62,19 +50,18 @@ describe('Ship Persistence', () => {
       
       // Assert
       expect(result).toBe(true);
-      expect(localStorageMock.setItem).toHaveBeenCalledWith(
-        `airshipHeroes_ship_${username}`,
+      expect(global.localStorage.setItem).toHaveBeenCalledWith(
+        `airshipHeroes_ship_${username}_0`,
         expect.any(String)
       );
       
-      // Verify the saved data
-      const savedData = JSON.parse(localStorageMock.setItem.mock.calls[0][1]);
+      const savedData = JSON.parse(global.localStorage.setItem.mock.calls[0][1]);
       expect(savedData).toEqual(shipDefinition);
     });
     
     test('should return false if an error occurs', () => {
       // Arrange
-      localStorageMock.setItem.mockImplementationOnce(() => {
+      global.localStorage.setItem.mockImplementationOnce(() => {
         throw new Error('Test error');
       });
       
@@ -89,32 +76,25 @@ describe('Ship Persistence', () => {
   describe('loadShip', () => {
     test('should load a ship from localStorage', () => {
       // Arrange
-      localStorageMock.getItem.mockReturnValueOnce(JSON.stringify(shipDefinition));
+      mockStorage[`airshipHeroes_ship_${username}_0`] = JSON.stringify(shipDefinition);
       
       // Act
       const result = shipStorage.loadShip(username);
       
       // Assert
       expect(result).toEqual(shipDefinition);
-      expect(localStorageMock.getItem).toHaveBeenCalledWith(
-        `airshipHeroes_ship_${username}`
+      expect(global.localStorage.getItem).toHaveBeenCalledWith(
+        `airshipHeroes_ship_${username}_0`
       );
     });
     
     test('should return null if no ship is found', () => {
-      // Arrange
-      localStorageMock.getItem.mockReturnValueOnce(null);
-      
-      // Act
       const result = shipStorage.loadShip(username);
-      
-      // Assert
       expect(result).toBeNull();
     });
     
     test('should return null if an error occurs', () => {
-      // Arrange
-      localStorageMock.getItem.mockImplementationOnce(() => {
+      global.localStorage.getItem.mockImplementationOnce(() => {
         throw new Error('Test error');
       });
       
@@ -129,26 +109,20 @@ describe('Ship Persistence', () => {
   describe('shipExists', () => {
     test('should return true if a ship exists', () => {
       // Arrange
-      localStorageMock.getItem.mockReturnValueOnce(JSON.stringify(shipDefinition));
+      mockStorage[`airshipHeroes_ship_${username}_0`] = JSON.stringify(shipDefinition);
       
       // Act
       const result = shipStorage.shipExists(username);
       
       // Assert
       expect(result).toBe(true);
-      expect(localStorageMock.getItem).toHaveBeenCalledWith(
-        `airshipHeroes_ship_${username}`
+      expect(global.localStorage.getItem).toHaveBeenCalledWith(
+        `airshipHeroes_ship_${username}_0`
       );
     });
     
     test('should return false if no ship exists', () => {
-      // Arrange
-      localStorageMock.getItem.mockReturnValueOnce(null);
-      
-      // Act
       const result = shipStorage.shipExists(username);
-      
-      // Assert
       expect(result).toBe(false);
     });
   });
@@ -160,14 +134,14 @@ describe('Ship Persistence', () => {
       
       // Assert
       expect(result).toBe(true);
-      expect(localStorageMock.removeItem).toHaveBeenCalledWith(
-        `airshipHeroes_ship_${username}`
+      expect(global.localStorage.removeItem).toHaveBeenCalledWith(
+        `airshipHeroes_ship_${username}_0`
       );
     });
     
     test('should return false if an error occurs', () => {
       // Arrange
-      localStorageMock.removeItem.mockImplementationOnce(() => {
+      global.localStorage.removeItem.mockImplementationOnce(() => {
         throw new Error('Test error');
       });
       
@@ -193,8 +167,8 @@ describe('Ship Persistence', () => {
       
       // Assert
       expect(loadResult).toEqual(shipDefinition);
-      expect(localStorageMock.getItem).toHaveBeenCalledWith(
-        `airshipHeroes_ship_${username}`
+      expect(global.localStorage.getItem).toHaveBeenCalledWith(
+        `airshipHeroes_ship_${username}_0`
       );
     });
     
@@ -211,8 +185,8 @@ describe('Ship Persistence', () => {
       
       // Assert
       expect(deleteResult).toBe(true);
-      expect(localStorageMock.removeItem).toHaveBeenCalledWith(
-        `airshipHeroes_ship_${username}`
+      expect(global.localStorage.removeItem).toHaveBeenCalledWith(
+        `airshipHeroes_ship_${username}_0`
       );
       
       // Verify the ship no longer exists

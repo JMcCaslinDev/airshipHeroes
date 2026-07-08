@@ -16,6 +16,7 @@ import { createResourceLoader } from './resources/resourceLoader.js';
 import { createPlayerModeController, createCrosshair } from './modes/playerMode.js';
 import { createShipModeController } from './modes/shipMode.js';
 import { createUIManager } from './ui/uiManager.js';
+import { createShipyardUI } from './ui/shipyardUI.js';
 import Player from './components/player.js';
 import Ship from './components/ship.js';
 import Projectile from './weapons/projectile.js';
@@ -67,14 +68,18 @@ const resourceLoader = createResourceLoader({
   onProgress: updateLoadingProgress,
   onComplete: onResourcesLoaded
 });
-const uiManager = createUIManager(gameState, startGame);
+const uiManager = createUIManager(gameState, handleLogin);
 
-// Multiplayer client will be created after login
+// Multiplayer client will be created after entering the arena
 let multiplayerClient = null;
 
 // Mode controllers
 let playerModeController = null;
 let shipModeController = null;
+let shipyardUI = null;
+
+// login | shipyard | build | arena
+let gamePhase = 'login';
 
 // Crosshair for player mode
 let crosshair = null;
@@ -88,6 +93,40 @@ const shipStorage = createShipStorage();
 
 // Initialize world manager
 const worldManager = createWorldManager();
+
+shipyardUI = createShipyardUI(shipStorage, {
+  onEditSlot: enterShipyardBuild,
+  onDepart: departToArena,
+  onImportSlot: importShipSlot,
+  onExportSlot: exportShipSlot
+});
+
+document.addEventListener('shipyardSave', () => {
+  if (gameState.localPlayer) {
+    savePlayerShip(gameState.localPlayer);
+    uiManager.showNotification('Ship saved');
+  }
+});
+
+document.addEventListener('shipyardBack', exitBuildToShipyard);
+
+document.addEventListener('shipyardExport', (event) => {
+  const slot = event.detail?.slot ?? gameState.localPlayer?.activeShipSlot ?? 0;
+  if (gameState.localPlayer?.username) {
+    exportShipSlot(gameState.localPlayer.username, slot);
+  }
+});
+
+/**
+ * Handle login — show the shipyard slot picker instead of jumping into the arena.
+ * @param {string} username
+ */
+function handleLogin(username) {
+  gameState.login(username);
+  gamePhase = 'shipyard';
+  gameState.phase = 'shipyard';
+  shipyardUI.show(username);
+}
 
 /**
  * Initialize the game
@@ -216,13 +255,229 @@ function onResourcesLoaded() {
 }
 
 /**
- * Start the game
- * @param {string} username - The player's username
+ * Minimal starter hull for an empty ship slot.
+ * @param {number} slot
+ * @returns {Object}
  */
-function startGame(username) {
+function createStarterShipDefinition(slot) {
+  return {
+    name: `Ship ${slot + 1}`,
+    position: { x: 0, y: 50, z: 0 },
+    rotation: 0,
+    blocks: [
+      { type: 'control', position: { x: 0, y: 0, z: 0 } },
+      { type: 'lift', position: { x: 0, y: -1, z: 0 } },
+      { type: 'lift', position: { x: 1, y: 0, z: 0 } },
+      { type: 'lift', position: { x: -1, y: 0, z: 0 } },
+      { type: 'wood', position: { x: 0, y: 0, z: 1 } },
+      { type: 'wood', position: { x: 0, y: 0, z: -1 } }
+    ]
+  };
+}
+
+/**
+ * Load a ship for the given slot onto the local player.
+ * @param {Object} player
+ * @param {number} slot
+ * @returns {Object|null}
+ */
+function loadShipForSlot(player, slot) {
+  player.activeShipSlot = slot;
+  shipStorage.setActiveSlot(player.username, slot);
+
+  let shipDefinition = shipStorage.loadShip(player.username, slot);
+  if (!shipDefinition?.blocks?.length) {
+    shipDefinition = createStarterShipDefinition(slot);
+  }
+
+  return loadShipForPlayer(player, shipDefinition);
+}
+
+/**
+ * Ensure the local player exists and is wired into the scene.
+ * @param {string} username
+ * @returns {Object}
+ */
+function ensureLocalPlayer(username) {
+  if (gameState.localPlayer) {
+    return gameState.localPlayer;
+  }
+
+  const localPlayer = new Player({
+    id: 'local',
+    username,
+    isLocal: true,
+    position: { x: 0, y: 50, z: 0 },
+    shipStorage
+  });
+
+  localPlayer.init(renderer.scene, renderer.camera);
+  gameState.setLocalPlayer(localPlayer);
+  gameState.addPlayer(localPlayer);
+
+  const canvas = renderer.canvas;
+  inputHandler.bindElement(canvas, canvas);
+  pointerLock = createPointerLockManager(canvas, {
+    shouldCapture: () => {
+      const hudVisible = document.getElementById('hud')?.style.display !== 'none';
+      return hudVisible && (gamePhase === 'build' || gamePhase === 'arena');
+    }
+  });
+
+  return localPlayer;
+}
+
+/**
+ * Create mode controllers if they do not exist yet.
+ * @param {Object} player
+ */
+function ensureModeControllers(player) {
+  if (!shipModeController) {
+    shipModeController = createShipModeController(player, renderer.camera, worldManager);
+  }
+  if (!playerModeController) {
+    playerModeController = createPlayerModeController(player, renderer.camera);
+  }
+  if (!crosshair) {
+    crosshair = createCrosshair();
+    crosshair.show();
+  }
+}
+
+/**
+ * Enter the isolated ship builder for a slot.
+ * @param {string} username
+ * @param {number} slot
+ */
+function enterShipyardBuild(username, slot) {
   try {
-    console.log(`Starting game for ${username}...`);
-    
+    gamePhase = 'build';
+    gameState.phase = 'build';
+    shipyardUI.hide();
+
+    const localPlayer = ensureLocalPlayer(username);
+    ensureModeControllers(localPlayer);
+    loadShipForSlot(localPlayer, slot);
+
+    shipModeController.deactivate();
+    gameState.mode = 'player';
+    playerModeController.activate();
+
+    uiManager.showHUD();
+    shipyardUI.showBuildToolbar(slot);
+    pointerLock?.request();
+
+    if (!gameLoop.isRunning) {
+      gameLoop.start();
+    }
+
+    uiManager.showNotification(`Editing slot ${slot + 1} — WASD move, place/break blocks, B toggles view`);
+  } catch (error) {
+    console.error('Error entering shipyard build:', error);
+    uiManager.showNotification('Failed to open ship builder');
+  }
+}
+
+/**
+ * Save and return to the shipyard slot picker.
+ */
+function exitBuildToShipyard() {
+  if (gameState.localPlayer) {
+    savePlayerShip(gameState.localPlayer);
+    playerModeController?.deactivate();
+  }
+
+  gamePhase = 'shipyard';
+  gameState.phase = 'shipyard';
+  shipyardUI.hideBuildToolbar();
+  uiManager.hideHUD();
+  pointerLock?.release();
+
+  if (gameState.localPlayer?.username) {
+    shipyardUI.show(gameState.localPlayer.username);
+  }
+}
+
+/**
+ * Export a slot's ship JSON to a downloadable file.
+ * @param {string} username
+ * @param {number} slot
+ */
+function exportShipSlot(username, slot) {
+  const definition = shipStorage.loadShip(username, slot);
+  if (!definition) {
+    uiManager.showNotification('No ship saved in that slot yet');
+    return;
+  }
+
+  const safeName = (definition.name || `ship_${slot + 1}`).replace(/[^a-z0-9]/gi, '_').toLowerCase();
+  const blob = new Blob([JSON.stringify(definition, null, 2)], { type: 'application/json' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `${safeName}.json`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  uiManager.showNotification(`Exported slot ${slot + 1}`);
+}
+
+/**
+ * Import a ship JSON file into a slot.
+ * @param {string} username
+ * @param {number} slot
+ * @param {File} file
+ */
+async function importShipSlot(username, slot, file) {
+  try {
+    const definition = JSON.parse(await file.text());
+    if (!definition?.blocks?.length) {
+      uiManager.showNotification('Invalid ship file');
+      return;
+    }
+
+    shipStorage.saveShip(username, definition, slot);
+
+    if (
+      gamePhase === 'build' &&
+      gameState.localPlayer?.username === username &&
+      gameState.localPlayer.activeShipSlot === slot
+    ) {
+      loadShipForPlayer(gameState.localPlayer, definition);
+    }
+
+    uiManager.showNotification(`Imported into slot ${slot + 1}`);
+    shipyardUI.refresh();
+  } catch (error) {
+    console.error('Import failed:', error);
+    uiManager.showNotification('Could not import ship file');
+  }
+}
+
+/**
+ * Depart from the shipyard into the arena with the chosen slot.
+ * @param {string} username
+ * @param {number} slot
+ */
+function departToArena(username, slot) {
+  if (gamePhase === 'build' && gameState.localPlayer) {
+    savePlayerShip(gameState.localPlayer);
+  }
+  startGame(username, slot);
+}
+
+/**
+ * Start the arena game
+ * @param {string} username - The player's username
+ * @param {number} [slot] - Ship slot to deploy
+ */
+function startGame(username, slot = shipStorage.getActiveSlot(username)) {
+  try {
+    console.log(`Departing to arena for ${username} with slot ${slot}...`);
+    gamePhase = 'arena';
+    gameState.phase = 'arena';
+    shipyardUI.hide();
+    shipyardUI.hideBuildToolbar();
+
     // Set username in game state
     gameState.login(username);
     console.log('Username set in game state');
@@ -238,53 +493,29 @@ function startGame(username) {
       console.error('Failed to set canvas z-index:', e);
     }
     
-    // Create local player
-    const localPlayer = new Player({
-      id: 'local',
-      username: username,
-      isLocal: true,
-      position: { x: 0, y: 50, z: 0 },
-      shipStorage: shipStorage
-    });
-    console.log('Local player created');
+    // Create or reuse local player
+    const localPlayer = ensureLocalPlayer(username);
+    localPlayer.activeShipSlot = slot;
+    shipStorage.setActiveSlot(username, slot);
+    console.log('Local player ready');
     
-    // Initialize player with scene and camera
-    localPlayer.init(renderer.scene, renderer.camera);
-    console.log('Player initialized');
-    
-    // Add player to game state
-    gameState.setLocalPlayer(localPlayer);
-    gameState.addPlayer(localPlayer);
-    console.log('Player added to game state');
-    
-    // Try to load saved ship
+    // Load ship for the selected slot (or default/starter fallback)
     let shipLoaded = false;
     try {
-      if (shipStorage && shipStorage.shipExists(username)) {
-        const savedShip = shipStorage.loadShip(username);
-        
-        if (savedShip && savedShip.blocks && Array.isArray(savedShip.blocks) && savedShip.blocks.length > 0) {
-          console.log(`Loaded saved ship for user: ${username} with ${savedShip.blocks.length} blocks`);
-          const ship = loadShipForPlayer(localPlayer, savedShip);
-          if (ship && ship.blockManager.blocks && ship.blockManager.blocks.length > 0) {
-            console.log(`Ship loaded successfully with ${ship.blockManager.blocks.length} blocks`);
-            shipLoaded = true;
-          } else {
-            console.error('Ship loaded but has no blocks, falling back to default ship');
-          }
-        } else {
-          console.warn('Saved ship is invalid or empty, falling back to default ship');
+      const savedShip = shipStorage.loadShip(username, slot);
+      if (savedShip?.blocks?.length) {
+        console.log(`Loaded slot ${slot} ship for ${username} with ${savedShip.blocks.length} blocks`);
+        const ship = loadShipForPlayer(localPlayer, savedShip);
+        if (ship?.blockManager?.blocks?.length) {
+          shipLoaded = true;
         }
-      } else {
-        console.log(`No saved ship found for user: ${username}, loading default ship`);
       }
     } catch (error) {
       console.error('Error loading saved ship:', error);
     }
     
-    // Load default ship if saved ship couldn't be loaded
     if (!shipLoaded) {
-      console.log('Loading default ship');
+      console.log('Loading default ship for arena deployment');
       loadDefaultShip(localPlayer);
     }
     
@@ -295,76 +526,50 @@ function startGame(username) {
     }
     
     // Capture mouse on canvas for ship + player modes
-    const canvas = renderer.canvas;
-    inputHandler.bindElement(canvas, canvas);
-    pointerLock = createPointerLockManager(canvas, {
-      shouldCapture: () => document.getElementById('hud')?.style.display !== 'none'
-    });
+    ensureModeControllers(localPlayer);
     
-    // Create mode controllers
-    try {
-      shipModeController = createShipModeController(localPlayer, renderer.camera, worldManager);
-      playerModeController = createPlayerModeController(localPlayer, renderer.camera);
-      console.log('Mode controllers created');
-      
-      // Clear any existing crosshair elements before creating new ones
-      const oldCrosshair = document.getElementById('crosshair');
-      if (oldCrosshair && oldCrosshair.parentNode) {
-        oldCrosshair.parentNode.removeChild(oldCrosshair);
-      }
-      
-      const oldContainer = document.getElementById('crosshair-container');
-      if (oldContainer && oldContainer.parentNode) {
-        oldContainer.parentNode.removeChild(oldContainer);
-      }
-      
-      // Create crosshair for player mode
-      crosshair = createCrosshair();
-      crosshair.show();
-      console.log('Crosshair created at game start');
-      
-      // Start in ship mode
-      gameState.mode = 'ship';
-      shipModeController.activate();
-      console.log('Ship mode activated');
-      
-      pointerLock?.request();
-      
-      // Force camera position update
-      renderer.camera.position.set(0, 60, 20);
-      renderer.camera.lookAt(0, 50, 0);
-      console.log('Camera position forced to:', renderer.camera.position);
-    } catch (error) {
-      console.error('Error creating mode controllers:', error);
-    }
+    // Start in ship mode for arena combat
+    gameState.mode = 'ship';
+    playerModeController.deactivate();
+    shipModeController.activate();
+    console.log('Ship mode activated for arena');
     
-    // Create multiplayer client
+    pointerLock?.request();
+    
+    // Force camera position update
+    renderer.camera.position.set(0, 60, 20);
+    renderer.camera.lookAt(0, 50, 0);
+    console.log('Camera position forced to:', renderer.camera.position);
+    
+    // Create multiplayer client (arena only)
     try {
-      multiplayerClient = createMultiplayerClient({
-        gameState,
-        onConnect: () => {
-          console.log('Connected to multiplayer server');
-          uiManager.showNotification('Connected to server');
-        },
-        onDisconnect: () => {
-          console.log('Disconnected from multiplayer server');
-          uiManager.showNotification('Disconnected from server - Playing in offline mode');
-          
-          // Continue with the game in offline mode
-          if (!gameLoop.isRunning) {
-            gameLoop.start();
-          }
-        },
-        onPlayerJoin: handlePlayerJoin,
-        onPlayerLeave: handlePlayerLeave,
-        onPlayerUpdate: handlePlayerUpdate,
-        onProjectileFired: handleProjectileFired,
-        onBlockPlaced: handleBlockPlaced,
-        onBlockRemoved: handleBlockRemoved,
-        onWorldState: handleWorldState,
-        onShipUpdate: handleShipUpdate
-      });
-      console.log('Multiplayer client created');
+      if (!multiplayerClient) {
+        multiplayerClient = createMultiplayerClient({
+          gameState,
+          onConnect: () => {
+            console.log('Connected to multiplayer server');
+            uiManager.showNotification('Connected to server');
+          },
+          onDisconnect: () => {
+            console.log('Disconnected from multiplayer server');
+            uiManager.showNotification('Disconnected from server - Playing in offline mode');
+            
+            // Continue with the game in offline mode
+            if (!gameLoop.isRunning) {
+              gameLoop.start();
+            }
+          },
+          onPlayerJoin: handlePlayerJoin,
+          onPlayerLeave: handlePlayerLeave,
+          onPlayerUpdate: handlePlayerUpdate,
+          onProjectileFired: handleProjectileFired,
+          onBlockPlaced: handleBlockPlaced,
+          onBlockRemoved: handleBlockRemoved,
+          onWorldState: handleWorldState,
+          onShipUpdate: handleShipUpdate
+        });
+        console.log('Multiplayer client created');
+      }
       
       // Connect to server
       multiplayerClient.connect();
@@ -874,6 +1079,10 @@ function handleProjectileExplode(position, damage) {
  * Toggle between Ship Mode and Player Mode
  */
 function toggleMode() {
+  if (gamePhase === 'build') {
+    return;
+  }
+
   console.log('Toggling mode from', gameState.mode);
   
   if (gameState.mode === 'ship') {
@@ -1071,7 +1280,11 @@ function savePlayerShip(player) {
     
     // Save to localStorage
     if (shipStorage) {
-      const saved = shipStorage.saveShip(player.username, shipDefinition);
+      const saved = shipStorage.saveShip(
+        player.username,
+        shipDefinition,
+        player.activeShipSlot
+      );
       if (saved) {
         console.log(`Ship saved to localStorage for ${player.username}`);
       } else {
@@ -1081,8 +1294,8 @@ function savePlayerShip(player) {
       console.warn("Ship storage not available");
     }
     
-    // Send to server if multiplayer is enabled
-    if (multiplayerClient) {
+    // Send to server only while in the arena
+    if (multiplayerClient && gamePhase === 'arena') {
       try {
         multiplayerClient.sendShipUpdate(shipDefinition);
         console.log("Ship update sent to server");

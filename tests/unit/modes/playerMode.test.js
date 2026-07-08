@@ -125,9 +125,15 @@ describe('Player Mode Controller', () => {
       },
       ship: {
         position: { x: 0, y: 0, z: 0 },
+        rotation: 0,
         blockManager: { blocks: [] },
-        group: { children: [], add: jest.fn(), remove: jest.fn() },
-        getBlockWorldPosition: jest.fn(() => ({ x: 0, y: 0, z: 0 }))
+        group: { children: [], add: jest.fn(), remove: jest.fn(), rotation: { y: 0 } },
+        getBlockWorldPosition: jest.fn(() => ({ x: 0, y: 0, z: 0 })),
+        steeringWheel: null,
+        transform: {
+          worldToLocalPosition: (p) => ({ x: p.x, y: p.y, z: p.z }),
+          localToWorldPosition: (p) => ({ x: p.x, y: p.y, z: p.z })
+        }
       },
       inventory: {
         selectedSlot: 0,
@@ -352,23 +358,19 @@ describe('Player Mode Controller', () => {
   });
   
   test('should update player position and handle collisions', () => {
-    // Set initial position and velocity
     mockPlayer.character.position.x = 0;
     mockPlayer.character.position.y = 10;
     mockPlayer.character.position.z = 0;
     mockPlayer.character.velocity.x = 1;
-    mockPlayer.character.velocity.y = -1;
     mockPlayer.character.velocity.z = 1;
-    
-    // Update controller
-    controller.update(1); // 1 second delta time
-    
-    // Check that position was updated
-    expect(mockPlayer.character.position.x).toBe(1);
-    expect(mockPlayer.character.position.y).toBeLessThan(10); // Gravity should have been applied
-    expect(mockPlayer.character.position.z).toBe(1);
-    
-    // Check that character mesh position was updated
+    mockPlayer.character.isOnGround = false;
+
+    controller.update(0.05);
+    controller.update(0.05);
+
+    expect(mockPlayer.character.position.x).toBeCloseTo(0.1, 5);
+    expect(mockPlayer.character.position.y).toBeLessThan(10);
+    expect(mockPlayer.character.position.z).toBeCloseTo(0.1, 5);
     expect(mockPlayer.character.mesh.position.set).toHaveBeenCalled();
   });
 }); 

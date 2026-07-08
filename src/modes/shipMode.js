@@ -6,6 +6,7 @@
  */
 
 import * as THREE from 'three';
+import { getControlBlockFeetWorld } from '../physics/shipLocalCollision.js';
 
 const CAMERA_SENSITIVITY = 0.003;
 const WHEEL_ORBIT_SENSITIVITY = 0.002;
@@ -123,14 +124,22 @@ export function createShipModeController(player, camera, world) {
     updateCamera();
   }
 
-  function updateCamera() {
-    if (!active || !player.ship) return;
-
-    const shipPosition = new THREE.Vector3(
+  function getShipOrbitTarget() {
+    const feet = getControlBlockFeetWorld(player.ship);
+    if (feet) {
+      return new THREE.Vector3(feet.x, feet.y, feet.z);
+    }
+    return new THREE.Vector3(
       player.ship.position.x,
       player.ship.position.y,
       player.ship.position.z
     );
+  }
+
+  function updateCamera() {
+    if (!active || !player.ship) return;
+
+    const target = getShipOrbitTarget();
 
     const cosPitch = Math.cos(cameraPitch);
     const offset = new THREE.Vector3(
@@ -139,8 +148,8 @@ export function createShipModeController(player, camera, world) {
       Math.cos(cameraYaw) * cosPitch * cameraDistance
     );
 
-    camera.position.copy(shipPosition).add(offset);
-    camera.lookAt(shipPosition);
+    camera.position.copy(target).add(offset);
+    camera.lookAt(target);
   }
 
   function update() {

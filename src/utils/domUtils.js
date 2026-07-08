@@ -30,11 +30,10 @@ export function createElement(tag, options = {}) {
   }
   
   if (options.className) {
-    if (Array.isArray(options.className)) {
-      element.classList.add(...options.className);
-    } else {
-      element.classList.add(options.className);
-    }
+    const names = Array.isArray(options.className)
+      ? options.className.filter(Boolean)
+      : [options.className];
+    element.classList.add(...names);
   }
   
   if (options.textContent) {

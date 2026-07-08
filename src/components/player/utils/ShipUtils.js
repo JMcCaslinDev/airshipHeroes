@@ -48,11 +48,11 @@ export function cleanupShip(ship) {
  * @param {String} username - The player's username
  * @returns {Boolean} - Whether the ship was successfully saved
  */
-export function saveShipToStorage(ship, shipStorage, username) {
+export function saveShipToStorage(ship, shipStorage, username, slot) {
   if (ship && shipStorage && username) {
     try {
       const shipDefinition = ship.serialize();
-      shipStorage.saveShip(username, shipDefinition);
+      shipStorage.saveShip(username, shipDefinition, slot);
       console.log("Ship saved to localStorage");
       return true;
     } catch (error) {

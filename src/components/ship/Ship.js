@@ -232,6 +232,10 @@ class Ship {
     return this.transform.worldToLocalPosition(worldPos);
   }
 
+  localToWorldPosition(localPos) {
+    return this.transform.localToWorldPosition(localPos);
+  }
+
   /**
    * Convert a world direction to a ship-local direction
    * @param {Object} worldDir - The world direction {x, y, z}

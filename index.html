@@ -45,9 +45,32 @@
           <label for="username-input">Username</label>
           <input type="text" id="username-input" placeholder="Enter your username" required>
         </div>
-        <button type="submit" class="primary-button">Play</button>
+        <button type="submit" class="primary-button">Enter Shipyard</button>
       </form>
     </div>
+  </div>
+
+  <!-- Shipyard Screen -->
+  <div id="shipyard-screen" class="fullscreen-overlay" style="display: none;">
+    <div class="shipyard-container">
+      <h1>Shipyard</h1>
+      <p id="shipyard-username" class="shipyard-subtitle"></p>
+      <div id="ship-slot-grid" class="ship-slot-grid"></div>
+      <div class="shipyard-footer">
+        <button id="shipyard-depart-btn" class="primary-button" type="button">Depart to Arena</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Build Toolbar (shown while editing a ship in the shipyard) -->
+  <div id="build-toolbar" class="build-toolbar" style="display: none;">
+    <span id="build-slot-label" class="build-slot-label">Editing Slot 1</span>
+    <button id="build-save-btn" class="secondary-button" type="button">Save</button>
+    <button id="build-export-btn" class="secondary-button" type="button">Export JSON</button>
+    <button id="build-import-btn" class="secondary-button" type="button">Import JSON</button>
+    <input type="file" id="build-import-input" accept=".json,application/json" hidden>
+    <button id="build-back-btn" class="secondary-button" type="button">Back to Shipyard</button>
+    <button id="build-depart-btn" class="primary-button" type="button">Depart to Arena</button>
   </div>
 
   <!-- Death Screen -->

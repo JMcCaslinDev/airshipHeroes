@@ -7,15 +7,28 @@
 import * as THREE from 'three';
 import {
   getPlayerMoveSpeed,
-  stepMinecraftVertical,
+  integrateVertical,
   feetOnBlockTop,
   nearestBlockTopBelow,
-  resolvePlayerCollisions,
+  movePlayer,
+  probeOnGround,
   MC_TICK,
   PLAYER_EYE_HEIGHT,
   PLAYER_SNEAK_EYE_HEIGHT,
   GROUND_SNAP_GAP
 } from '../physics/playerMovement.js';
+import {
+  getShipLocalBlockBoxes,
+  worldMovementToLocal,
+  localFeetToWorld,
+  getControlBlockFeetWorld
+} from '../physics/shipLocalCollision.js';
+
+/** Third-person: 1 block above eyes, ~1 block further back, wider FOV for full Steve. */
+const THIRD_PERSON_BACK = 6;
+const THIRD_PERSON_UP = 1;
+const THIRD_PERSON_FOV = 78;
+const THIRD_PERSON_LOOK_Y = 1;
 
 /**
  * Create a player mode controller
@@ -35,10 +48,10 @@ export function createPlayerModeController(player, camera) {
     maxPlaceDistance: 4,
     
     motionY: 0,
-    verticalTickBuffer: 0,
     jumpRequested: false,
     cameraView: 'first',
     cameraToggleLatch: false,
+    defaultFov: 75,
     
     // Mouse button states to prevent multiple actions per click
     leftMouseDown: false,
@@ -70,6 +83,8 @@ export function createPlayerModeController(player, camera) {
     state.cameraRotation.x = player.cameraRotation.x;
     state.cameraRotation.y = player.cameraRotation.y;
     
+    state.defaultFov = state.camera.fov ?? 75;
+
     // Show character mesh only in third person
     if (player.character) {
       if (player.character.setFirstPersonView) {
@@ -79,38 +94,24 @@ export function createPlayerModeController(player, camera) {
       }
     }
     
-    // Position character at ship's control block
+    // Position character on control block (ship-local grid → world)
     if (player.ship) {
-      // Find the control block
-      const controlBlock = player.ship.blockManager.blocks.find(block => block.type === 'control');
-      
-      if (controlBlock) {
-        console.log('Found control block at position:', controlBlock.position);
+      const feetWorld = getControlBlockFeetWorld(player.ship);
+      if (feetWorld) {
+        player.character.position.x = feetWorld.x;
+        player.character.position.y = feetWorld.y;
+        player.character.position.z = feetWorld.z;
+        state.motionY = 0;
 
-        const blockBox = controlBlock.getCollisionBox(player.ship);
-        player.character.position.x = (blockBox.min.x + blockBox.max.x) / 2;
-        player.character.position.y = blockBox.max.y;
-        player.character.position.z = (blockBox.min.z + blockBox.max.z) / 2;
-        
-        // Update character mesh position
         if (player.character.mesh) {
-          player.character.mesh.position.set(
-            player.character.position.x,
-            player.character.position.y,
-            player.character.position.z
-          );
+          player.character.mesh.position.set(feetWorld.x, feetWorld.y, feetWorld.z);
         }
-        
-        console.log('Positioned player at:', player.character.position);
+        console.log('Positioned player on control block:', player.character.position);
       } else {
         console.warn('No control block found on ship, using default position');
-        
-        // Fallback to positioning at ship's center if no control block is found
         player.character.position.x = player.ship.position.x;
-        player.character.position.y = player.ship.position.y + 1.0; // Stand on top of the ship
+        player.character.position.y = player.ship.position.y + 1.0;
         player.character.position.z = player.ship.position.z;
-        
-        // Update character mesh position
         if (player.character.mesh) {
           player.character.mesh.position.set(
             player.character.position.x,
@@ -219,7 +220,7 @@ export function createPlayerModeController(player, camera) {
     if (blocksChanged && player.shipStorage && player.username && player.ship) {
       try {
         const shipDefinition = player.ship.serialize();
-        player.shipStorage.saveShip(player.username, shipDefinition);
+        player.shipStorage.saveShip(player.username, shipDefinition, player.activeShipSlot);
         console.log("Ship saved to localStorage on player mode deactivation");
         blocksChanged = false;
       } catch (error) {
@@ -508,18 +509,14 @@ export function createPlayerModeController(player, camera) {
   
   
   function getBlockBoxes() {
-    if (!player.ship?.blockManager?.blocks?.length) {
-      return [];
-    }
-    return player.ship.blockManager.blocks
-      .filter((block) => block.mesh)
-      .map((block) => block.getCollisionBox(player.ship));
+    return getShipLocalBlockBoxes(player.ship);
   }
 
-  function hasGroundSupport(x, y, z) {
+  function hasGroundSupport(worldX, worldY, worldZ) {
+    const local = player.ship.transform.worldToLocalPosition({ x: worldX, y: worldY, z: worldZ });
     const boxes = getBlockBoxes();
     for (const box of boxes) {
-      if (feetOnBlockTop(x, y, z, box)) {
+      if (feetOnBlockTop(local.x, local.y, local.z, box)) {
         return true;
       }
     }
@@ -527,73 +524,81 @@ export function createPlayerModeController(player, camera) {
   }
 
   function snapFeetToGround() {
-    const { x, y, z } = player.character.position;
-    const topY = nearestBlockTopBelow(x, y, z, getBlockBoxes());
-    if (topY !== null && Math.abs(y - topY) <= 0.55 && state.motionY <= 0) {
-      player.character.position.y = topY;
+    const world = player.character.position;
+    const local = player.ship.transform.worldToLocalPosition(world);
+    const topY = nearestBlockTopBelow(local.x, local.y, local.z, getBlockBoxes());
+    if (topY !== null && Math.abs(local.y - topY) <= GROUND_SNAP_GAP && state.motionY <= 0) {
+      const snapped = localFeetToWorld(player.ship, local.x, topY, local.z);
+      player.character.position.y = snapped.y;
     }
   }
 
-  function applyCollisionResolution() {
+  function applyMovement(deltaTime) {
     if (!player.ship) {
       return;
     }
 
     const boxes = getBlockBoxes();
-    const result = resolvePlayerCollisions(
-      player.character.position.x,
-      player.character.position.y,
-      player.character.position.z,
+    const world = player.character.position;
+    const sneaking = player.character.isSneaking;
+
+    const localStart = player.ship.transform.worldToLocalPosition(world);
+    const onGround = probeOnGround(localStart.x, localStart.y, localStart.z, boxes, sneaking)
+      || (player.character.isOnGround && state.motionY <= 0);
+
+    const vertical = integrateVertical(state.motionY, onGround, state.jumpRequested, deltaTime);
+    state.motionY = vertical.motionY;
+
+    let dx = player.character.velocity.x * deltaTime;
+    let dz = player.character.velocity.z * deltaTime;
+    const dy = vertical.deltaY;
+
+    if (sneaking && (dx !== 0 || dz !== 0) && !hasGroundSupport(world.x + dx, world.y, world.z + dz)) {
+      dx = 0;
+      dz = 0;
+    }
+
+    const localMove = worldMovementToLocal(player.ship, world.x, world.y, world.z, dx, dy, dz);
+    const moved = movePlayer(
+      localMove.x,
+      localMove.y,
+      localMove.z,
+      localMove.dx,
+      localMove.dy,
+      localMove.dz,
       boxes,
-      player.character.isSneaking,
-      state.motionY,
-      { axes: 'y' }
+      sneaking
     );
 
-    player.character.position.x = result.x;
-    player.character.position.y = result.y;
-    player.character.position.z = result.z;
-    state.motionY = result.motionY;
+    const feetWorld = localFeetToWorld(player.ship, moved.x, moved.y, moved.z);
+    player.character.position.x = feetWorld.x;
+    player.character.position.y = feetWorld.y;
+    player.character.position.z = feetWorld.z;
 
-    if (result.onGround && state.motionY <= 0) {
-      player.character.isOnGround = true;
+    if (vertical.jumped) {
+      player.character.isJumping = true;
+      player.character.isOnGround = false;
+    }
+
+    const grounded = moved.onGround
+      || probeOnGround(moved.x, moved.y, moved.z, boxes, sneaking);
+    player.character.isOnGround = grounded && state.motionY <= 0;
+
+    if (grounded) {
       player.character.isJumping = false;
-      player.character.velocity.y = 0;
-    }
-    if (result.hitCeiling) {
-      player.character.velocity.y = 0;
-    }
-  }
-
-  function moveHorizontal(deltaTime) {
-    const nextX = player.character.position.x + player.character.velocity.x * deltaTime;
-    const nextZ = player.character.position.z + player.character.velocity.z * deltaTime;
-    let { x, y, z } = player.character.position;
-
-    if (player.character.isSneaking && (player.character.velocity.x !== 0 || player.character.velocity.z !== 0)) {
-      if (!hasGroundSupport(nextX, y, nextZ)) {
-        return;
+      if (state.motionY < 0) {
+        state.motionY = 0;
       }
     }
-
-    const dx = nextX - x;
-    const dz = nextZ - z;
-
-    if (dx !== 0) {
-      x += dx;
-      const result = resolvePlayerCollisions(x, y, z, getBlockBoxes(), player.character.isSneaking, state.motionY, { axes: 'xz' });
-      x = result.x;
+    if (moved.hitCeiling) {
+      state.motionY = 0;
     }
 
-    if (dz !== 0) {
-      z += dz;
-      const result = resolvePlayerCollisions(x, y, z, getBlockBoxes(), player.character.isSneaking, state.motionY, { axes: 'xz' });
-      z = result.z;
-    }
+    player.character.velocity.y = state.motionY / MC_TICK;
 
-    player.character.position.x = x;
-    player.character.position.y = y;
-    player.character.position.z = z;
+    if (state.motionY <= 0) {
+      snapFeetToGround();
+    }
   }
 
   /**
@@ -609,15 +614,14 @@ export function createPlayerModeController(player, camera) {
       const forward = new THREE.Vector3(0, 0, -1);
       forward.applyEuler(new THREE.Euler(0, state.cameraRotation.y, 0, 'YXZ'));
 
-      const behindDist = 4.5;
-      const aboveDist = 2.2;
+      state.camera.fov = THIRD_PERSON_FOV;
       state.camera.position.set(
-        x - forward.x * behindDist,
-        y + aboveDist,
-        z - forward.z * behindDist
+        x - forward.x * THIRD_PERSON_BACK,
+        y + eyeHeight + THIRD_PERSON_UP,
+        z - forward.z * THIRD_PERSON_BACK
       );
 
-      state.camera.lookAt(x, y + eyeHeight, z);
+      state.camera.lookAt(x, y + THIRD_PERSON_LOOK_Y, z);
       state.camera.updateProjectionMatrix();
       state.camera.updateMatrixWorld();
 
@@ -626,6 +630,8 @@ export function createPlayerModeController(player, camera) {
       }
       return;
     }
+
+    state.camera.fov = state.defaultFov;
 
     state.camera.position.x = x;
     state.camera.position.y = y + eyeHeight;
@@ -644,60 +650,25 @@ export function createPlayerModeController(player, camera) {
     state.camera.updateMatrixWorld();
   }
   
-  function updateGroundState() {
-    const { x, y, z } = player.character.position;
-
-    if (state.motionY <= 0) {
-      snapFeetToGround();
-    }
-
-    const supported = hasGroundSupport(x, player.character.position.y, z);
-    player.character.isOnGround = supported && state.motionY <= 0;
-    if (player.character.isOnGround) {
-      player.character.isJumping = false;
-    }
-  }
-
-  /**
-   * Update the controller
-   * @param {number} deltaTime - The time since the last update in seconds
-   */
   function update(deltaTime) {
     if (!state.active) return;
 
-    updateGroundState();
-    moveHorizontal(deltaTime);
+    applyMovement(deltaTime);
 
-    state.verticalTickBuffer += deltaTime;
-    while (state.verticalTickBuffer >= MC_TICK) {
-      state.verticalTickBuffer -= MC_TICK;
-
-      updateGroundState();
-
-      const { motionY, deltaY, jumped } = stepMinecraftVertical(
-        state.motionY,
-        player.character.isOnGround,
-        state.jumpRequested
-      );
-
-      state.motionY = motionY;
-      if (jumped) {
-        player.character.isJumping = true;
-        player.character.isOnGround = false;
+    if (player.ship?.transform) {
+      const local = player.ship.transform.worldToLocalPosition(player.character.position);
+      if (local.y < -2) {
+        const feetWorld = getControlBlockFeetWorld(player.ship);
+        if (feetWorld) {
+          player.character.position.x = feetWorld.x;
+          player.character.position.y = feetWorld.y;
+          player.character.position.z = feetWorld.z;
+          state.motionY = 0;
+          player.character.velocity.y = 0;
+          player.character.isJumping = false;
+          player.character.isOnGround = true;
+        }
       }
-
-      player.character.position.y += deltaY;
-      player.character.velocity.y = motionY / MC_TICK;
-
-      applyCollisionResolution();
-      updateGroundState();
-    }
-
-    if (player.character.position.y < 0) {
-      player.character.position.y = 0;
-      state.motionY = 0;
-      player.character.velocity.y = 0;
-      player.character.isJumping = false;
     }
 
     player.character.mesh.position.set(

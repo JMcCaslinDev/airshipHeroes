@@ -16,6 +16,7 @@ export function createGameState(options = {}) {
     
     // Game mode
     mode: 'ship', // 'ship' or 'player'
+    phase: 'login', // login | shipyard | build | arena
     
     // World state
     world: {
@@ -193,6 +194,8 @@ export function createGameState(options = {}) {
     get players() { return state.players; },
     get mode() { return state.mode; },
     set mode(value) { state.mode = value; },
+    get phase() { return state.phase; },
+    set phase(value) { state.phase = value; },
     get world() { return state.world; },
     set world(value) { state.world = value; },
     get projectiles() { return state.projectiles; },

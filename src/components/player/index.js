@@ -15,6 +15,7 @@ import PlayerCharacter from './modes/PlayerCharacter.js';
 import PlayerUI from './ui/PlayerUI.js';
 import { updateCamera } from './utils/CameraUtils.js';
 import { validateShipBlocks, cleanupShip } from './utils/ShipUtils.js';
+import { getControlBlockFeetWorld } from '../../physics/shipLocalCollision.js';
 
 class Player {
   /**
@@ -28,6 +29,7 @@ class Player {
     this.ship = null;
     this.mode = 'ship'; // 'ship' or 'player'
     this.shipStorage = options.shipStorage || null;
+    this.activeShipSlot = options.activeShipSlot ?? 0;
     
     // Initialize player character
     this.character = new PlayerCharacter();
@@ -116,9 +118,14 @@ class Player {
       
       // Position character on the ship
       if (this.ship && this.ship.steeringWheel) {
-        const wheelPos = this.ship.getBlockWorldPosition(this.ship.steeringWheel);
-        this.character.position = { ...wheelPos };
-        this.character.position.y += 1; // Stand on top of the steering wheel
+        const feet = getControlBlockFeetWorld(this.ship);
+        if (feet) {
+          this.character.position = { x: feet.x, y: feet.y, z: feet.z };
+        } else {
+          const wheelPos = this.ship.getBlockWorldPosition(this.ship.steeringWheel);
+          this.character.position = { ...wheelPos };
+          this.character.position.y += 1;
+        }
         this.character.updateMeshPosition();
       } else {
         // Fallback if no steering wheel is found
