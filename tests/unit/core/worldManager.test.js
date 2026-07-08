@@ -130,12 +130,12 @@ describe('WorldManager', () => {
   
   test('should get the correct color for different block types', () => {
     // Check colors for different block types
-    expect(worldManager.getBlockColor('wood')).toBe(0x8B4513);
-    expect(worldManager.getBlockColor('stone')).toBe(0x808080);
+    expect(worldManager.getBlockColor('wood')).toBe(0xBC986A);
+    expect(worldManager.getBlockColor('stone')).toBe(0x7F7F7F);
     expect(worldManager.getBlockColor('metal')).toBe(0xA9A9A9);
-    expect(worldManager.getBlockColor('lift')).toBe(0xFFD700);
-    expect(worldManager.getBlockColor('cannon')).toBe(0x696969);
-    expect(worldManager.getBlockColor('steering')).toBe(0x8B0000);
+    expect(worldManager.getBlockColor('lift')).toBe(0xE9ECEC);
+    expect(worldManager.getBlockColor('cannon')).toBe(0x7F7F7F);
+    expect(worldManager.getBlockColor('steering')).toBe(0x6B4423);
     expect(worldManager.getBlockColor('unknown')).toBe(0xFFFFFF);
   });
   

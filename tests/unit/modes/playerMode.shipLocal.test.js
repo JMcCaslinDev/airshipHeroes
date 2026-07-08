@@ -58,7 +58,9 @@ function makePlayer(ship) {
         rotation: { x: 0, y: 0, z: 0, y: 0 },
         visible: false
       },
-      setFirstPersonView: jest.fn()
+      setFirstPersonView: jest.fn(),
+      setViewMode: jest.fn(),
+      syncOutlineToFeet: jest.fn(),
     },
     ship,
     inventory: {
@@ -70,6 +72,8 @@ function makePlayer(ship) {
       blockInteractions: {
         maxPlaceDistance: 4,
         breakBlock: jest.fn().mockReturnValue(false),
+        updateMining: jest.fn().mockReturnValue(false),
+        cancelMining: jest.fn(),
         placeBlock: jest.fn().mockReturnValue(false)
       }
     }

@@ -536,14 +536,16 @@ export function createUIManager(gameState, loginCallback) {
    */
   function getBlockColor(blockType) {
     const colors = {
-      'wood': '#8B4513',
-      'stone': '#808080',
+      'wood': '#BC986A',
+      'stone': '#7F7F7F',
       'iron': '#A19D94',
       'gold': '#FFD700',
-      'lift': '#FFB6C1',
+      'lift': '#E9ECEC',
+      'armor': '#985E2D',
       'engine': '#FF4500',
-      'cannon': '#696969',
-      'steering': '#4682B4',
+      'cannon': '#7F7F7F',
+      'control': '#6B4423',
+      'steering': '#6B4423',
       'default': '#AAAAAA'
     };
     

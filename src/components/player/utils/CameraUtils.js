@@ -32,22 +32,8 @@ function updateShipModeCamera(_player) {
 
 /**
  * Update the camera for Player Mode (first-person)
- * @param {Object} player - The player instance
+ * ponytail: playerModeController owns player camera — do not override here.
  */
-function updatePlayerModeCamera(player) {
-  player.camera.position.set(
-    player.character.position.x,
-    player.character.position.y + 1.6, // Eye level
-    player.character.position.z
-  );
-  
-  // Apply camera rotation
-  player.camera.rotation.order = 'YXZ'; // This order is important for first-person controls
-  player.camera.rotation.x = player.cameraRotation.x;
-  player.camera.rotation.y = player.cameraRotation.y;
-  player.camera.rotation.z = 0;
-  
-  // Update the camera's matrices to ensure they're current
-  player.camera.updateProjectionMatrix();
-  player.camera.updateMatrixWorld();
+function updatePlayerModeCamera(_player) {
+  // no-op
 } 

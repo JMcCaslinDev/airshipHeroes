@@ -35,8 +35,8 @@ export function createShipModeController(player, camera, world) {
     active = true;
     player.mode = 'ship';
 
-    if (player.character?.mesh) {
-      player.character.mesh.visible = false;
+    if (player.character?.position && player.ship) {
+      player.character.showShipModeOutline(player.character.position, player.ship);
     }
 
     updateCamera();
@@ -44,6 +44,7 @@ export function createShipModeController(player, camera, world) {
 
   function deactivate() {
     active = false;
+    player.character?.hideShipModeOutline?.();
     if (player.ship) {
       player.ship.controls = {
         forward: false,

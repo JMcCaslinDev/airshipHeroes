@@ -164,7 +164,7 @@ describe('BlockFactory', () => {
     test('should return the correct color for each block type', () => {
       // Test each block type
       const blockTypes = ['wood', 'stone', 'lift', 'cannon', 'control'];
-      const expectedColors = [0x8B4513, 0x808080, 0xFFD700, 0x696969, 0x8B0000];
+      const expectedColors = [0xBC986A, 0x7F7F7F, 0xE9ECEC, 0x7F7F7F, 0x6B4423];
       
       blockTypes.forEach((type, index) => {
         const block = BlockFactory.createBlock(type, { x: 0, y: 0, z: 0 });

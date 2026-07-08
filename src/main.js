@@ -1020,9 +1020,11 @@ function handlePlayerUpdate(data) {
         player.character.mesh.rotation.y = data.characterRotation;
         player.character.mesh.visible = true;
       }
-    } else if (player.character && player.character.mesh) {
-      // Hide character mesh in Ship Mode
-      player.character.mesh.visible = false;
+    } else if (player.character && player.ship) {
+      player.character.showShipModeOutline?.(
+        data.characterPosition ?? player.character.position,
+        player.ship
+      );
     }
     
     // Update stats

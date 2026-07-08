@@ -16,6 +16,7 @@ import PlayerUI from './ui/PlayerUI.js';
 import { updateCamera } from './utils/CameraUtils.js';
 import { validateShipBlocks, cleanupShip } from './utils/ShipUtils.js';
 import { getControlBlockFeetWorld } from '../../physics/shipLocalCollision.js';
+export { playerVisualConfig, setShowPlayerOutline } from './playerVisualConfig.js';
 
 class Player {
   /**
@@ -139,6 +140,7 @@ class Player {
       }
       
       // Show player character
+      this.character.hideShipModeOutline?.();
       this.character.setVisible(true);
       
       // Reset inventory selection to first slot when entering player mode
@@ -147,8 +149,10 @@ class Player {
       // Switch to Ship Mode
       this.mode = 'ship';
       
-      // Hide player character
-      this.character.setVisible(false);
+      // Show skinned Steve on deck at last standing position
+      if (this.ship) {
+        this.character.showShipModeOutline?.(this.character.position, this.ship);
+      }
     }
     
     // Update UI

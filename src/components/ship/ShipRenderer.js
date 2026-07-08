@@ -5,6 +5,7 @@
  */
 
 import * as THREE from 'three';
+import { attachBlockEdges } from '../../blocks/blockEdgeOutline.js';
 
 class ShipRenderer {
   /**
@@ -257,6 +258,8 @@ class ShipRenderer {
       block.mesh.userData.type = block.type;
       block.mesh.userData.gridPosition = { ...block.position };
       
+      attachBlockEdges(block.mesh);
+      
       updatedCount++;
     }
     
@@ -428,11 +431,12 @@ class ShipRenderer {
    */
   getDefaultColorForType(type) {
     switch (type.toLowerCase()) {
-      case 'wood': return 0x8B4513;
-      case 'stone': return 0x808080;
-      case 'lift': return 0xFFD700;
-      case 'cannon': return 0x696969;
-      case 'control': return 0x8B0000;
+      case 'wood': return 0xBC986A;
+      case 'stone': return 0x7F7F7F;
+      case 'lift': return 0xE9ECEC;
+      case 'armor': return 0x985E2D;
+      case 'cannon': return 0x7F7F7F;
+      case 'control': return 0x6B4423;
       default: return 0xAAAAAA;
     }
   }

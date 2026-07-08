@@ -6,6 +6,7 @@
  */
 
 import * as THREE from 'three';
+import { attachBlockEdges } from './blockEdgeOutline.js';
 
 class BlockFactory {
   /**
@@ -92,6 +93,7 @@ class BlockFactory {
         
         // Create mesh
         this.mesh = new THREE.Mesh(geometry, material);
+        attachBlockEdges(this.mesh);
         
         // Set position
         this.mesh.position.set(this.position.x, this.position.y, this.position.z);
@@ -180,12 +182,13 @@ class BlockFactory {
       // Get default color for the block type
       getDefaultColor() {
         switch (this.type) {
-          case 'wood': return 0x8B4513;
-          case 'stone': return 0x808080;
-          case 'lift': return 0xFFD700;
-          case 'cannon': return 0x696969;
-          case 'control': return 0x8B0000;
-          case 'engine': return 0x444444; // Dark gray for engines
+          case 'wood': return 0xBC986A;
+          case 'stone': return 0x7F7F7F;
+          case 'lift': return 0xE9ECEC;
+          case 'armor': return 0x985E2D;
+          case 'cannon': return 0x7F7F7F;
+          case 'control': return 0x6B4423;
+          case 'engine': return 0x444444;
           default: return 0xAAAAAA;
         }
       },

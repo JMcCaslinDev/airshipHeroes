@@ -5,6 +5,7 @@
  */
 
 import * as THREE from 'three';
+import { attachBlockEdges } from '../blocks/blockEdgeOutline.js';
 
 /**
  * Create a world manager
@@ -60,6 +61,7 @@ export function createWorldManager() {
       
       // Create block mesh
       const mesh = new THREE.Mesh(geometry, material);
+      attachBlockEdges(mesh);
       mesh.position.set(position.x, position.y, position.z);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
@@ -116,17 +118,20 @@ export function createWorldManager() {
     getBlockColor(type) {
       switch (type) {
         case 'wood':
-          return 0x8B4513;
+          return 0xBC986A;
         case 'stone':
-          return 0x808080;
+          return 0x7F7F7F;
         case 'metal':
           return 0xA9A9A9;
         case 'lift':
-          return 0xFFD700;
+          return 0xE9ECEC;
+        case 'armor':
+          return 0x985E2D;
         case 'cannon':
-          return 0x696969;
+          return 0x7F7F7F;
+        case 'control':
         case 'steering':
-          return 0x8B0000;
+          return 0x6B4423;
         default:
           return 0xFFFFFF;
       }

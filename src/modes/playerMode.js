@@ -24,11 +24,10 @@ import {
   getControlBlockFeetWorld
 } from '../physics/shipLocalCollision.js';
 
-/** Third-person: 1 block above eyes, ~1 block further back, wider FOV for full Steve. */
-const THIRD_PERSON_BACK = 6;
-const THIRD_PERSON_UP = 1;
-const THIRD_PERSON_FOV = 78;
-const THIRD_PERSON_LOOK_Y = 1;
+import {
+  computeThirdPersonCamera,
+  THIRD_PERSON_FOV
+} from '../components/player/modes/playerCharacterVisuals.js';
 
 /**
  * Create a player mode controller
@@ -87,10 +86,11 @@ export function createPlayerModeController(player, camera) {
 
     // Show character mesh only in third person
     if (player.character) {
-      if (player.character.setFirstPersonView) {
+      player.character.hideShipModeOutline?.();
+      if (player.character?.setViewMode) {
+        player.character.setViewMode(state.cameraView === 'first' ? 'first' : 'third');
+      } else if (player.character.setFirstPersonView) {
         player.character.setFirstPersonView(state.cameraView === 'first');
-      } else if (player.character.mesh) {
-        player.character.mesh.visible = state.cameraView === 'third';
       }
     }
     
@@ -209,6 +209,9 @@ export function createPlayerModeController(player, camera) {
     
     // Remove player-mode class from body
     document.body.classList.remove('player-mode');
+
+    player.controls?.blockInteractions?.cancelMining?.();
+    player.controls?.blockInteractions?.clearTargetOutline?.();
     
     // Cancel any pending timeouts for processing block actions
     if (state.blockActionTimeout) {
@@ -319,7 +322,9 @@ export function createPlayerModeController(player, camera) {
     if (keys.toggleCamera && !state.cameraToggleLatch) {
       state.cameraView = state.cameraView === 'first' ? 'third' : 'first';
       state.cameraToggleLatch = true;
-      if (player.character?.setFirstPersonView) {
+      if (player.character?.setViewMode) {
+        player.character.setViewMode(state.cameraView === 'first' ? 'first' : 'third');
+      } else if (player.character?.setFirstPersonView) {
         player.character.setFirstPersonView(state.cameraView === 'first');
       }
     } else if (!keys.toggleCamera) {
@@ -448,10 +453,8 @@ export function createPlayerModeController(player, camera) {
     event.stopPropagation();
 
     if (event.button === 0) {
-      if (!state.leftMouseDown && !state.processingBlockAction) {
+      if (!state.leftMouseDown) {
         state.leftMouseDown = true;
-        state.processingBlockAction = true;
-        requestAnimationFrame(() => performBlockAction('break'));
       }
       return;
     }
@@ -485,13 +488,7 @@ export function createPlayerModeController(player, camera) {
     if (event.button === 0) {
       console.log("Left mouse button released");
       state.leftMouseDown = false;
-      // Reset processing flag after a short delay to prevent rapid re-clicks
-      setTimeout(() => {
-        if (!state.leftMouseDown) {
-          console.log("Resetting processingBlockAction flag after left mouse up");
-          state.processingBlockAction = false;
-        }
-      }, 100); // Shorter delay for better responsiveness
+      player.controls?.blockInteractions?.cancelMining?.();
     }
     
     if (event.button === 2) {
@@ -611,21 +608,21 @@ export function createPlayerModeController(player, camera) {
     const { x, y, z } = player.character.position;
 
     if (state.cameraView === 'third') {
-      const forward = new THREE.Vector3(0, 0, -1);
-      forward.applyEuler(new THREE.Euler(0, state.cameraRotation.y, 0, 'YXZ'));
-
-      state.camera.fov = THIRD_PERSON_FOV;
-      state.camera.position.set(
-        x - forward.x * THIRD_PERSON_BACK,
-        y + eyeHeight + THIRD_PERSON_UP,
-        z - forward.z * THIRD_PERSON_BACK
+      const cam = computeThirdPersonCamera(
+        { x, y, z },
+        eyeHeight,
+        state.cameraRotation.y
       );
 
-      state.camera.lookAt(x, y + THIRD_PERSON_LOOK_Y, z);
+      state.camera.fov = THIRD_PERSON_FOV;
+      state.camera.position.set(cam.position.x, cam.position.y, cam.position.z);
+      state.camera.lookAt(cam.lookAt.x, cam.lookAt.y, cam.lookAt.z);
       state.camera.updateProjectionMatrix();
       state.camera.updateMatrixWorld();
 
-      if (player.character?.setFirstPersonView) {
+      if (player.character?.setViewMode) {
+        player.character.setViewMode('third');
+      } else if (player.character?.setFirstPersonView) {
         player.character.setFirstPersonView(false);
       }
       return;
@@ -642,7 +639,9 @@ export function createPlayerModeController(player, camera) {
     state.camera.rotation.y = state.cameraRotation.y;
     state.camera.rotation.z = 0;
 
-    if (player.character?.setFirstPersonView) {
+    if (player.character?.setViewMode) {
+      player.character.setViewMode('first');
+    } else if (player.character?.setFirstPersonView) {
       player.character.setFirstPersonView(true);
     }
 
@@ -654,6 +653,16 @@ export function createPlayerModeController(player, camera) {
     if (!state.active) return;
 
     applyMovement(deltaTime);
+
+    if (state.leftMouseDown && player.controls?.blockInteractions) {
+      const broke = player.controls.blockInteractions.updateMining(deltaTime);
+      if (broke) {
+        blocksChanged = true;
+        player.ui?.updateInventory?.();
+      }
+    }
+
+    player.controls?.blockInteractions?.updateTargetOutline?.();
 
     if (player.ship?.transform) {
       const local = player.ship.transform.worldToLocalPosition(player.character.position);
@@ -676,6 +685,10 @@ export function createPlayerModeController(player, camera) {
       player.character.position.y,
       player.character.position.z
     );
+    player.character.mesh.rotation.y = player.character.rotation;
+    if (player.character.viewMode === 'third') {
+      player.character.syncOutlineToFeet?.();
+    }
 
     updateCamera();
   }
@@ -700,6 +713,12 @@ export function createPlayerModeController(player, camera) {
     },
     get cameraRotation() {
       return { ...state.cameraRotation };
+    },
+    get cameraView() {
+      return state.cameraView;
+    },
+    set cameraView(value) {
+      state.cameraView = value;
     },
     get blocksChanged() { return blocksChanged; },
     set blocksChanged(value) { blocksChanged = value; }

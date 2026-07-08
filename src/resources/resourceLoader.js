@@ -49,13 +49,13 @@ export function createResourceLoader(options = {}) {
     };
     
     // Create fallback textures for each type
-    textures.set('wood', createCanvasTexture('#8B4513'));
-    textures.set('stone', createCanvasTexture('#808080'));
-    textures.set('lift', createCanvasTexture('#FFD700'));
-    textures.set('cannon', createCanvasTexture('#696969'));
-    textures.set('control', createCanvasTexture('#8B0000'));
+    textures.set('wood', createCanvasTexture('#BC986A'));
+    textures.set('stone', createCanvasTexture('#7F7F7F'));
+    textures.set('lift', createCanvasTexture('#E9ECEC'));
+    textures.set('cannon', createCanvasTexture('#7F7F7F'));
+    textures.set('control', createCanvasTexture('#6B4423'));
     textures.set('engine', createCanvasTexture('#444444'));
-    textures.set('armor', createCanvasTexture('#606060'));
+    textures.set('armor', createCanvasTexture('#985E2D'));
     textures.set('crosshair', createCanvasTexture('#FFFFFF'));
   };
   
@@ -181,6 +181,7 @@ export function createResourceLoader(options = {}) {
         { name: 'wood', path: '/assets/textures/blocks/wood.svg' },
         { name: 'stone', path: '/assets/textures/blocks/stone.svg' },
         { name: 'lift', path: '/assets/textures/blocks/lift.svg' },
+        { name: 'armor', path: '/assets/textures/blocks/armor.svg' },
         { name: 'cannon', path: '/assets/textures/blocks/cannon.svg' },
         { name: 'control', path: '/assets/textures/blocks/control.svg' },
         { name: 'crosshair', path: '/assets/textures/ui/crosshair.svg' }
@@ -203,6 +204,11 @@ export function createResourceLoader(options = {}) {
             textureFile.path,
             (texture) => {
               console.log(`Texture loaded: ${textureFile.path}`);
+              
+              // ponytail: nearest filter keeps 16x16 MC-style pixels sharp on block faces
+              texture.magFilter = THREE.NearestFilter;
+              texture.minFilter = THREE.NearestFilter;
+              texture.colorSpace = THREE.SRGBColorSpace;
               
               // Store texture
               textures.set(textureFile.name, texture);

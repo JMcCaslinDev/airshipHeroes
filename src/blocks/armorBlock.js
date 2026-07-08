@@ -46,17 +46,17 @@ class ArmorBlock extends BaseBlock {
       } catch (error) {
         console.warn('Failed to load armor block texture, using default color', error);
         material = new THREE.MeshStandardMaterial({ 
-          color: 0x808080, // Gray
-          metalness: 0.7,
-          roughness: 0.3
+          color: 0x985E2D, // Terracotta (Movecraft armor)
+          metalness: 0.2,
+          roughness: 0.8
         });
       }
     } else {
       // Use default color if no texture loader
       material = new THREE.MeshStandardMaterial({ 
-        color: 0x808080, // Gray
-        metalness: 0.7,
-        roughness: 0.3
+        color: 0x985E2D, // Terracotta (Movecraft armor)
+        metalness: 0.2,
+        roughness: 0.8
       });
     }
     

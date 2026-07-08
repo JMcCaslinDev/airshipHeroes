@@ -3,6 +3,7 @@
  */
 
 import { createPlayerModeController } from '../../../src/modes/playerMode.js';
+import { THIRD_PERSON_BACK, THIRD_PERSON_HEIGHT } from '../../../src/components/player/modes/playerCharacterVisuals.js';
 import * as THREE from 'three';
 
 // Mock Three.js
@@ -121,7 +122,9 @@ describe('Player Mode Controller', () => {
           rotation: { x: 0, y: 0, z: 0, y: 0 },
           visible: false
         },
-        setFirstPersonView: jest.fn()
+        setFirstPersonView: jest.fn(),
+        setViewMode: jest.fn(),
+        syncOutlineToFeet: jest.fn(),
       },
       ship: {
         position: { x: 0, y: 0, z: 0 },
@@ -144,6 +147,8 @@ describe('Player Mode Controller', () => {
         blockInteractions: {
           maxPlaceDistance: 4,
           breakBlock: jest.fn().mockReturnValue(false),
+          updateMining: jest.fn().mockReturnValue(false),
+          cancelMining: jest.fn(),
           placeBlock: jest.fn().mockReturnValue(false)
         }
       }
@@ -151,7 +156,16 @@ describe('Player Mode Controller', () => {
     
     // Create mock camera
     mockCamera = {
-      position: { x: 0, y: 0, z: 0, set: jest.fn() },
+      position: {
+        x: 0,
+        y: 0,
+        z: 0,
+        set(x, y, z) {
+          this.x = x;
+          this.y = y;
+          this.z = z;
+        }
+      },
       rotation: { x: 0, y: 0, z: 0, order: 'YXZ' },
       updateProjectionMatrix: jest.fn(),
       updateMatrixWorld: jest.fn(),
@@ -180,7 +194,7 @@ describe('Player Mode Controller', () => {
   test('should activate player mode', () => {
     expect(controller.active).toBe(true);
     expect(mockPlayer.mode).toBe('player');
-    expect(mockPlayer.character.setFirstPersonView).toHaveBeenCalledWith(true);
+    expect(mockPlayer.character.setViewMode).toHaveBeenCalledWith('first');
   });
   
   test('should deactivate player mode', () => {
@@ -312,6 +326,20 @@ describe('Player Mode Controller', () => {
     expect(mockPlayer.character.rotation).toEqual(controller.cameraRotation.y);
   });
   
+  test('third person camera is higher and behind the player', () => {
+    mockPlayer.character.position.x = 0;
+    mockPlayer.character.position.y = 50;
+    mockPlayer.character.position.z = 0;
+    controller.cameraRotation.y = 0;
+    controller.cameraView = 'third';
+
+    controller.updateCamera();
+
+    expect(mockCamera.position.y).toBeCloseTo(50 + THIRD_PERSON_HEIGHT, 4);
+    expect(mockCamera.position.z).toBeCloseTo(THIRD_PERSON_BACK, 4);
+    expect(mockPlayer.character.setViewMode).toHaveBeenCalledWith('third');
+  });
+
   test('should update camera position', () => {
     // Set character position
     mockPlayer.character.position.x = 10;
@@ -345,7 +373,7 @@ describe('Player Mode Controller', () => {
     expect(mockCamera.position.z).toBe(10);
   });
   
-  test('should delegate left click to BlockInteractions.breakBlock', () => {
+  test('left mouse down starts mining via update loop', () => {
     const mockEvent = {
       button: 0,
       preventDefault: jest.fn(),
@@ -353,8 +381,8 @@ describe('Player Mode Controller', () => {
     };
 
     controller.handleMouseDown(mockEvent);
-
-    expect(mockPlayer.controls.blockInteractions.breakBlock).toHaveBeenCalled();
+    controller.update(0.016);
+    expect(mockPlayer.controls.blockInteractions.updateMining).toHaveBeenCalled();
   });
   
   test('should update player position and handle collisions', () => {

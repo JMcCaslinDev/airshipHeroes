@@ -198,43 +198,43 @@ class PlayerUI {
     
     switch (itemType) {
       case 'wood':
-        backgroundColor = '#8B4513';
-        borderTopColor = '#A0522D';
-        borderLeftColor = '#A0522D';
-        borderRightColor = '#654321';
-        borderBottomColor = '#654321';
+        backgroundColor = '#BC986A';
+        borderTopColor = '#D8B98B';
+        borderLeftColor = '#D8B98B';
+        borderRightColor = '#A0824F';
+        borderBottomColor = '#A0824F';
         itemIcon = '🪵';
         break;
       case 'stone':
-        backgroundColor = '#808080';
-        borderTopColor = '#A0A0A0';
-        borderLeftColor = '#A0A0A0';
-        borderRightColor = '#606060';
-        borderBottomColor = '#606060';
+        backgroundColor = '#7F7F7F';
+        borderTopColor = '#909090';
+        borderLeftColor = '#909090';
+        borderRightColor = '#666666';
+        borderBottomColor = '#666666';
         itemIcon = '🧱';
         break;
       case 'lift':
-        backgroundColor = '#FFD700';
-        borderTopColor = '#FFF700';
-        borderLeftColor = '#FFF700';
-        borderRightColor = '#DAA520';
-        borderBottomColor = '#DAA520';
-        itemIcon = '🎈';
+        backgroundColor = '#E9ECEC';
+        borderTopColor = '#FFFFFF';
+        borderLeftColor = '#FFFFFF';
+        borderRightColor = '#CEC9C9';
+        borderBottomColor = '#CEC9C9';
+        itemIcon = '☁️';
         break;
       case 'cannon':
-        backgroundColor = '#696969';
-        borderTopColor = '#808080';
-        borderLeftColor = '#808080';
+        backgroundColor = '#7F7F7F';
+        borderTopColor = '#909090';
+        borderLeftColor = '#909090';
         borderRightColor = '#505050';
         borderBottomColor = '#505050';
         itemIcon = '💣';
         break;
       case 'control':
-        backgroundColor = '#8B0000';
-        borderTopColor = '#A52A2A';
-        borderLeftColor = '#A52A2A';
-        borderRightColor = '#800000';
-        borderBottomColor = '#800000';
+        backgroundColor = '#6B4423';
+        borderTopColor = '#8B5A2B';
+        borderLeftColor = '#8B5A2B';
+        borderRightColor = '#4A2F14';
+        borderBottomColor = '#4A2F14';
         itemIcon = '🎮';
         break;
       default:

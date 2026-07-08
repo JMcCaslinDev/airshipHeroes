@@ -9,6 +9,13 @@
 
 import * as THREE from 'three';
 import BlockFactory from '../../../blocks/blockFactory.js';
+import {
+  getBlockBreakSeconds,
+  isUnbreakableBlock,
+  breakProgressToStage
+} from '../../../blocks/blockHardness.js';
+import { setBlockCrackStage, clearBlockCrack } from './blockBreakOverlay.js';
+import { updateBlockTargetOutline, clearBlockTargetOutline } from './blockTargetOutline.js';
 
 class BlockInteractions {
   /**
@@ -18,53 +25,125 @@ class BlockInteractions {
   constructor(player) {
     this.player = player;
     this.maxPlaceDistance = 5; // Maximum distance to place blocks
+    this.mining = null;
+  }
+
+  positionKey(position) {
+    return `${position.x},${position.y},${position.z}`;
   }
 
   /**
-   * Break a block in the world
+   * Raycast the block the player is looking at.
+   * @returns {{ block: Object, mesh: THREE.Mesh, intersection: Object }|null}
    */
-  breakBlock() {
-    console.log("Breaking block...");
-    
-    // Only allow block breaking in player mode
+  getTargetBlock() {
     if (this.player.mode !== 'player') {
-      console.log("Cannot break blocks in ship mode");
-      return;
+      return null;
     }
-    
+
     const { eyePosition, lookDirection } = this.getEyePositionAndDirection();
-    
-    // Cast ray to find block to break
     const raycaster = new THREE.Raycaster(eyePosition, lookDirection);
     raycaster.far = this.maxPlaceDistance;
-    
-    // Check for intersection with the ship
-    if (this.player.ship && this.player.ship.blockManager && this.player.ship.blockManager.blocks.length > 0) {
-      // Get all block meshes from the ship
-      const blockMeshes = this.getBlockMeshes();
-      
-      // Check for intersection with block meshes
-      const intersects = raycaster.intersectObjects(blockMeshes, false);
-      
-      if (intersects.length > 0) {
-        // Get the first intersection
-        const intersection = intersects[0];
-        
-        // Handle block breaking
-        this.handleBlockBreaking(intersection);
-        
-        // Validate ship blocks after breaking
-        this.player.validateShipBlocks();
-        
-        // Save ship to storage
-        this.saveShipToStorage();
-        
-        return true;
-      }
+
+    const blockMeshes = this.getBlockMeshes();
+    const intersects = raycaster.intersectObjects(blockMeshes, false);
+    if (!intersects.length) {
+      return null;
     }
-    
-    console.log("No block found to break");
+
+    const intersection = intersects[0];
+    const block = this.resolveBlockFromIntersection(intersection);
+    if (!block?.mesh) {
+      return null;
+    }
+
+    return { block, mesh: block.mesh, intersection };
+  }
+
+  resolveBlockFromIntersection(intersection) {
+    const mesh = intersection.object;
+    if (mesh.userData?.block) {
+      return mesh.userData.block;
+    }
+
+    const localPos = this.player.ship.worldToLocalPosition({
+      x: intersection.point.x,
+      y: intersection.point.y,
+      z: intersection.point.z
+    });
+    return this.player.ship.getBlockAtLocalPosition(localPos);
+  }
+
+  /**
+   * Hold-to-mine: advance progress each frame while targeting the same block.
+   * @returns {boolean} true when a block was broken this tick
+   */
+  updateMining(deltaTime) {
+    const target = this.getTargetBlock();
+    if (!target) {
+      this.cancelMining();
+      return false;
+    }
+
+    const { block, mesh } = target;
+    const key = this.positionKey(block.position);
+
+    if (isUnbreakableBlock(block.type)) {
+      this.cancelMining();
+      return false;
+    }
+
+    if (!this.mining || this.mining.key !== key) {
+      this.cancelMining();
+      this.mining = { block, mesh, key, progress: 0 };
+    }
+
+    const breakSeconds = getBlockBreakSeconds(block.type);
+    this.mining.progress += deltaTime / breakSeconds;
+    setBlockCrackStage(mesh, breakProgressToStage(this.mining.progress));
+
+    if (this.mining.progress >= 1) {
+      const broke = this.finishBlockBreak(block);
+      this.cancelMining();
+      return broke;
+    }
+
     return false;
+  }
+
+  cancelMining() {
+    if (this.mining?.mesh) {
+      clearBlockCrack(this.mining.mesh);
+    }
+    this.mining = null;
+  }
+
+  /** Show MC-style outline on the block under the crosshair. */
+  updateTargetOutline() {
+    if (this.player.mode !== 'player') {
+      clearBlockTargetOutline();
+      return;
+    }
+    const target = this.getTargetBlock();
+    updateBlockTargetOutline(target?.mesh ?? null);
+  }
+
+  clearTargetOutline() {
+    clearBlockTargetOutline();
+  }
+
+  /**
+   * Break a block in the world (legacy single-click — completes instantly if called directly).
+   */
+  breakBlock() {
+    const target = this.getTargetBlock();
+    if (!target) {
+      return false;
+    }
+    if (isUnbreakableBlock(target.block.type)) {
+      return false;
+    }
+    return this.finishBlockBreak(target.block);
   }
 
   /**
@@ -142,79 +221,43 @@ class BlockInteractions {
   }
 
   /**
+   * Remove a block and add drops to inventory.
+   * @param {Object} block
+   * @returns {boolean}
+   */
+  finishBlockBreak(block) {
+    if (!block) {
+      return false;
+    }
+
+    const blockType = block.type;
+    const removed = this.player.ship.removeBlock(block.position);
+    if (!removed) {
+      return false;
+    }
+
+    clearBlockCrack(block.mesh);
+    this.player.inventory.addItem({ type: blockType });
+    this.player.validateShipBlocks();
+    this.saveShipToStorage();
+    return true;
+  }
+
+  /**
    * Handle the actual block breaking logic
    * @param {Object} intersection - The intersection data
    */
   handleBlockBreaking(intersection) {
-    // Get the block from the mesh
-    const mesh = intersection.object;
-    
-    // First try to get the block from the mesh's userData
-    let block = mesh.userData.block;
-    
+    const block = this.resolveBlockFromIntersection(intersection);
     if (block) {
-      console.log(`Found block of type: ${block.type} at position:`, block.position);
-      
-      // Store block type before removal
-      const blockType = block.type;
-      
-      // Try to remove the block from the ship
-      const removed = this.player.ship.removeBlock(block.position);
-      
-      if (removed) {
-        console.log("Block successfully removed from ship");
-        
-        // Add to inventory
-        this.player.inventory.addItem({ type: blockType });
-        
-        // Save ship to localStorage if shipStorage is available
-        this.saveShipToStorage();
-      }
-    } else {
-      console.error("No block data found on mesh");
-      
-      // Try to find the block by world position
-      const intersectionPoint = intersection.point.clone();
-      
-      // Convert the intersection point to ship-local coordinates
-      const localPos = this.player.ship.worldToLocalPosition({
-        x: intersectionPoint.x,
-        y: intersectionPoint.y,
-        z: intersectionPoint.z
-      });
-      
-      // Find the block at this position
-      const blockAtPosition = this.player.ship.getBlockAtLocalPosition(localPos);
-      
-      if (blockAtPosition) {
-        console.log(`Found block by position: ${blockAtPosition.type} at local position:`, blockAtPosition.position);
-        
-        // Store block type before removal
-        const blockType = blockAtPosition.type;
-        
-        // Try to remove the block from the ship
-        const removed = this.player.ship.removeBlock(blockAtPosition.position);
-        
-        if (removed) {
-          console.log("Block successfully removed by position");
-          
-          // Add to inventory
-          this.player.inventory.addItem({ type: blockType });
-          
-          // Save ship and inventory
-          this.saveShipToStorage();
-        } else {
-          console.log("Block could not be removed (might be a critical block)");
-        }
-      } else {
-        console.error("Could not find block at local position:", localPos);
-        
-        // As a last resort, remove the mesh from the scene
-        if (mesh.parent) {
-          mesh.parent.remove(mesh);
-          console.log("Removed orphaned mesh from scene");
-        }
-      }
+      this.finishBlockBreak(block);
+      return;
+    }
+
+    console.error('No block data found on mesh');
+    const mesh = intersection.object;
+    if (mesh.parent) {
+      mesh.parent.remove(mesh);
     }
   }
 
@@ -375,11 +418,12 @@ class BlockInteractions {
         
         // Fill with a color based on block type
         switch (type) {
-          case 'wood': ctx.fillStyle = '#8B4513'; break;
-          case 'stone': ctx.fillStyle = '#808080'; break;
-          case 'lift': ctx.fillStyle = '#FFD700'; break;
-          case 'cannon': ctx.fillStyle = '#696969'; break;
-          case 'control': ctx.fillStyle = '#8B0000'; break;
+          case 'wood': ctx.fillStyle = '#BC986A'; break;
+          case 'stone': ctx.fillStyle = '#7F7F7F'; break;
+          case 'lift': ctx.fillStyle = '#E9ECEC'; break;
+          case 'armor': ctx.fillStyle = '#985E2D'; break;
+          case 'cannon': ctx.fillStyle = '#7F7F7F'; break;
+          case 'control': ctx.fillStyle = '#6B4423'; break;
           default: ctx.fillStyle = '#AAAAAA'; break;
         }
         
