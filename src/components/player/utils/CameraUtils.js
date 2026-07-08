@@ -24,23 +24,10 @@ export function updateCamera(player) {
 
 /**
  * Update the camera for Ship Mode (third-person)
- * @param {Object} player - The player instance
+ * ponytail: orbit camera owned by shipModeController — do not override here.
  */
-function updateShipModeCamera(player) {
-  if (player.ship) {
-    try {
-      const { position, target } = player.ship.getCameraPositionAndTarget();
-      
-      player.camera.position.set(position.x, position.y, position.z);
-      player.camera.lookAt(target.x, target.y, target.z);
-    } catch (error) {
-      console.error('Error updating ship camera:', error);
-      
-      // Fallback camera position
-      player.camera.position.set(0, 60, 20);
-      player.camera.lookAt(0, 50, 0);
-    }
-  }
+function updateShipModeCamera(_player) {
+  // no-op
 }
 
 /**

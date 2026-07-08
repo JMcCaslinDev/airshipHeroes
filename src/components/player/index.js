@@ -102,6 +102,7 @@ class Player {
     this.controls.state.down = isShipMode ? !!keys.e : false;
     this.controls.state.jump = !isShipMode && !!keys.up;
     this.controls.state.sneak = !isShipMode && !!keys.down;
+    this.controls.state.sprint = !isShipMode && !!keys.sprint;
     this.controls.state.fire = !!keys.fire;
   }
 
@@ -135,20 +136,12 @@ class Player {
       
       // Reset inventory selection to first slot when entering player mode
       this.inventory.selectSlot(0);
-      
-      // Request pointer lock for first-person view
-      document.body.requestPointerLock();
     } else {
       // Switch to Ship Mode
       this.mode = 'ship';
       
       // Hide player character
       this.character.setVisible(false);
-      
-      // Exit pointer lock
-      if (document.pointerLockElement) {
-        document.exitPointerLock();
-      }
     }
     
     // Update UI

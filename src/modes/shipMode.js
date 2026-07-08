@@ -8,9 +8,12 @@
 import * as THREE from 'three';
 
 const CAMERA_SENSITIVITY = 0.003;
-const MIN_CAMERA_DISTANCE = 5;
-const MAX_CAMERA_DISTANCE = 50;
-const DEFAULT_CAMERA_DISTANCE = 20;
+const WHEEL_ORBIT_SENSITIVITY = 0.002;
+const MIN_CAMERA_DISTANCE = 8;
+const MAX_CAMERA_DISTANCE = 60;
+const DEFAULT_CAMERA_DISTANCE = 25;
+const ZOOM_STEP = 2;
+const MOUSE_WHEEL_DELTA_THRESHOLD = 40;
 
 /**
  * Create a ship mode controller
@@ -65,21 +68,57 @@ export function createShipModeController(player, camera, world) {
     };
   }
 
+  function clampPitch() {
+    cameraPitch = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, cameraPitch));
+  }
+
+  function adjustZoom(deltaY) {
+    const direction = Math.sign(deltaY) || 1;
+    cameraDistance += direction * ZOOM_STEP;
+    cameraDistance = Math.max(MIN_CAMERA_DISTANCE, Math.min(MAX_CAMERA_DISTANCE, cameraDistance));
+  }
+
   function handleMouseMove(deltaX, deltaY) {
     if (!active) return;
 
     cameraYaw -= deltaX * CAMERA_SENSITIVITY;
     cameraPitch -= deltaY * CAMERA_SENSITIVITY;
-    cameraPitch = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, cameraPitch));
+    clampPitch();
 
     updateCamera();
   }
 
-  function handleMouseWheel(delta) {
+  /**
+   * @param {number} deltaY
+   * @param {number} deltaX
+   * @param {{ ctrlKey?: boolean }} [modifiers]
+   */
+  function handleMouseWheel(deltaY, deltaX = 0, modifiers = {}) {
     if (!active) return;
 
-    cameraDistance += delta * 0.02;
-    cameraDistance = Math.max(MIN_CAMERA_DISTANCE, Math.min(MAX_CAMERA_DISTANCE, cameraDistance));
+    // Trackpad pinch-zoom (macOS sends wheel + ctrlKey)
+    if (modifiers.ctrlKey) {
+      adjustZoom(deltaY);
+      updateCamera();
+      return;
+    }
+
+    // Trackpad two-finger pan → orbit (wheel with deltaX / small deltaY)
+    if (deltaX !== 0) {
+      cameraYaw -= deltaX * WHEEL_ORBIT_SENSITIVITY;
+      cameraPitch -= deltaY * WHEEL_ORBIT_SENSITIVITY;
+      clampPitch();
+      updateCamera();
+      return;
+    }
+
+    // Vertical only: mouse wheel notch = zoom; small delta = trackpad pitch orbit
+    if (Math.abs(deltaY) >= MOUSE_WHEEL_DELTA_THRESHOLD) {
+      adjustZoom(deltaY);
+    } else if (deltaY !== 0) {
+      cameraPitch -= deltaY * WHEEL_ORBIT_SENSITIVITY;
+      clampPitch();
+    }
 
     updateCamera();
   }

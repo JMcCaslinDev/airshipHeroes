@@ -140,9 +140,9 @@ describe('Crosshair', () => {
     // Execute - ship mode
     crosshair.update('ship');
     
-    // Verify
-    expect(crosshair.hide).toHaveBeenCalled();
-    expect(crosshair.show).not.toHaveBeenCalled();
+    // Verify — crosshair visible in both modes
+    expect(crosshair.show).toHaveBeenCalled();
+    expect(crosshair.hide).not.toHaveBeenCalled();
   });
   
   test('should destroy the crosshair', () => {

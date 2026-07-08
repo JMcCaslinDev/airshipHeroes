@@ -228,10 +228,20 @@ describe('Ship Mode Controller', () => {
   test('mouse wheel zooms camera in and out', () => {
     const initialDistance = controller.cameraDistance;
 
-    controller.handleMouseWheel(-100);
+    controller.handleMouseWheel(-100, 0);
     expect(controller.cameraDistance).toBeLessThan(initialDistance);
 
-    controller.handleMouseWheel(200);
-    expect(controller.cameraDistance).toBeGreaterThan(initialDistance - 2);
+    controller.handleMouseWheel(100, 0);
+    expect(controller.cameraDistance).toBeGreaterThan(initialDistance - 4);
+  });
+
+  test('trackpad pan (wheel deltaX) orbits camera without zooming distance', () => {
+    const initialDistance = controller.cameraDistance;
+    mockCamera.lookAt.mockClear();
+
+    controller.handleMouseWheel(0, 15);
+
+    expect(mockCamera.lookAt).toHaveBeenCalled();
+    expect(controller.cameraDistance).toBe(initialDistance);
   });
 }); 

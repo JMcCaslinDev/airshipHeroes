@@ -15,7 +15,8 @@
  * @returns {Object} The input handler
  */
 export function createInputHandler(options = {}) {
-  const element = options.element || document;
+  let interactionElement = options.element || document;
+  let pointerLockTarget = options.pointerLockTarget || null;
   
   // Input states
   const keys = {
@@ -28,6 +29,7 @@ export function createInputHandler(options = {}) {
     // Action keys
     up: false, // Space (jump)
     down: false, // X (sneak)
+    sprint: false, // Shift
     q: false, // Q (up in ship mode)
     e: false, // E (down in ship mode)
     fire: false, // F
@@ -51,6 +53,7 @@ export function createInputHandler(options = {}) {
     map: false, // M
     chat: false, // T
     escape: false, // Escape
+    toggleCamera: false, // F5 — first / third person
   };
   
   // Mouse states
@@ -75,11 +78,7 @@ export function createInputHandler(options = {}) {
     // Add event listeners
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
-    element.addEventListener('mousemove', handleMouseMove);
-    element.addEventListener('mousedown', handleMouseDown);
-    element.addEventListener('mouseup', handleMouseUp);
-    element.addEventListener('wheel', handleMouseWheel);
-    element.addEventListener('contextmenu', (e) => e.preventDefault());
+    bindPointerListeners(interactionElement, pointerLockTarget);
     
     // Add direct event listener for number keys (1-9) for inventory selection
     window.addEventListener('keydown', (event) => {
@@ -158,13 +157,15 @@ export function createInputHandler(options = {}) {
       case 'KeyX':
         keys.down = isDown;
         break;
+      case 'ShiftLeft':
+      case 'ShiftRight':
+        keys.sprint = isDown;
+        break;
       case 'KeyQ':
         keys.q = isDown;
-        console.log(`Q key ${isDown ? 'pressed' : 'released'}`);
         break;
       case 'KeyE':
         keys.e = isDown;
-        console.log(`E key ${isDown ? 'pressed' : 'released'}`);
         break;
       case 'KeyR':
         keys.fire = isDown;
@@ -173,6 +174,9 @@ export function createInputHandler(options = {}) {
       // Mode keys
       case 'KeyB':
         keys.toggleMode = isDown;
+        break;
+      case 'F5':
+        keys.toggleCamera = isDown;
         break;
       
       // Inventory keys - only update these in player mode
@@ -231,7 +235,7 @@ export function createInputHandler(options = {}) {
     
     return [
       'KeyW', 'KeyS', 'KeyA', 'KeyD',
-      'Space', 'KeyX', 'KeyQ', 'KeyE', 'KeyF',
+      'Space', 'KeyX', 'ShiftLeft', 'ShiftRight', 'KeyQ', 'KeyE', 'KeyF', 'F5',
       'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5',
       'Digit6', 'Digit7', 'Digit8', 'Digit9',
       'Tab'
@@ -240,9 +244,17 @@ export function createInputHandler(options = {}) {
   
   /**
    * Handle mouse move events
+   * ponytail: with pointer lock, browsers dispatch mousemove on document — not the canvas.
    * @param {MouseEvent} event - The mouse event
    */
   function handleMouseMove(event) {
+    const locked = !pointerLockTarget || document.pointerLockElement === pointerLockTarget;
+    const shipDragLook = window.gameState?.mode === 'ship' && event.buttons > 0;
+
+    if (!locked && !shipDragLook) {
+      return;
+    }
+
     const deltaX = event.movementX || event.mozMovementX || event.webkitMovementX || 0;
     const deltaY = event.movementY || event.mozMovementY || event.webkitMovementY || 0;
     
@@ -297,21 +309,54 @@ export function createInputHandler(options = {}) {
    * @param {WheelEvent} event - The wheel event
    */
   function handleMouseWheel(event) {
-    onMouseWheel(event.deltaY);
+    if (pointerLockTarget) {
+      event.preventDefault();
+    }
+    onMouseWheel(event.deltaY, event.deltaX, { ctrlKey: event.ctrlKey });
   }
-  
+
+  function unbindPointerListeners() {
+    document.removeEventListener('mousemove', handleMouseMove);
+    document.removeEventListener('wheel', handleMouseWheel);
+    if (interactionElement) {
+      interactionElement.removeEventListener('mousedown', handleMouseDown);
+      interactionElement.removeEventListener('mouseup', handleMouseUp);
+      interactionElement.removeEventListener('contextmenu', preventContextMenu);
+    }
+  }
+
+  function bindPointerListeners(newInteractionElement, lockTarget) {
+    unbindPointerListeners();
+    interactionElement = newInteractionElement;
+    pointerLockTarget = lockTarget;
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('wheel', handleMouseWheel, { passive: false });
+    interactionElement.addEventListener('mousedown', handleMouseDown);
+    interactionElement.addEventListener('mouseup', handleMouseUp);
+    interactionElement.addEventListener('contextmenu', preventContextMenu);
+  }
+
+  function preventContextMenu(e) {
+    e.preventDefault();
+  }
+
+  /**
+   * Re-bind mouse listeners to the game canvas (and pointer-lock target).
+   * @param {HTMLElement} newElement
+   * @param {HTMLElement} [lockTarget]
+   */
+  function bindElement(newElement, lockTarget = newElement) {
+    bindPointerListeners(newElement, lockTarget);
+  }
+
   /**
    * Destroy the input handler
    */
   function destroy() {
-    // Remove event listeners
     window.removeEventListener('keydown', handleKeyDown);
     window.removeEventListener('keyup', handleKeyUp);
-    element.removeEventListener('mousemove', handleMouseMove);
-    element.removeEventListener('mousedown', handleMouseDown);
-    element.removeEventListener('mouseup', handleMouseUp);
-    element.removeEventListener('wheel', handleMouseWheel);
-    element.removeEventListener('contextmenu', (e) => e.preventDefault());
+    unbindPointerListeners();
   }
   
   // Initialize
@@ -321,9 +366,10 @@ export function createInputHandler(options = {}) {
     keys,
     mouse,
     destroy,
+    bindElement,
     onMouseMove,
     onMouseDown,
     onMouseUp,
     onMouseWheel
   };
-} 
+}

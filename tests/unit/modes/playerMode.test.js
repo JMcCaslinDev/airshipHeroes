@@ -115,11 +115,13 @@ describe('Player Mode Controller', () => {
         velocity: { x: 0, y: 0, z: 0 },
         isJumping: false,
         isSneaking: false,
+        isOnGround: true,
         mesh: {
           position: { x: 0, y: 0, z: 0, set: jest.fn() },
           rotation: { x: 0, y: 0, z: 0, y: 0 },
           visible: false
-        }
+        },
+        setFirstPersonView: jest.fn()
       },
       ship: {
         position: { x: 0, y: 0, z: 0 },
@@ -172,18 +174,14 @@ describe('Player Mode Controller', () => {
   test('should activate player mode', () => {
     expect(controller.active).toBe(true);
     expect(mockPlayer.mode).toBe('player');
-    expect(mockPlayer.character.mesh.visible).toBe(true);
-    expect(document.body.requestPointerLock).toHaveBeenCalled();
+    expect(mockPlayer.character.setFirstPersonView).toHaveBeenCalledWith(true);
   });
   
   test('should deactivate player mode', () => {
-    document.pointerLockElement = document.body;
     controller.activate();
     controller.deactivate();
 
     expect(controller.active).toBe(false);
-    expect(document.exitPointerLock).toHaveBeenCalled();
-    document.pointerLockElement = null;
   });
   
   test('handleInput should set forward velocity for W key', () => {
@@ -238,7 +236,9 @@ describe('Player Mode Controller', () => {
     expect(mockPlayer.character.velocity.x).toBeGreaterThan(0);
   });
 
-  test('handleInput should apply jump velocity when Space is pressed', () => {
+  test('handleInput records jump intent without applying velocity immediately', () => {
+    mockPlayer.character.isOnGround = true;
+
     controller.handleInput({
       forward: false,
       backward: false,
@@ -248,8 +248,25 @@ describe('Player Mode Controller', () => {
       down: false
     });
 
-    expect(mockPlayer.character.velocity.y).toBeGreaterThan(0);
-    expect(mockPlayer.character.isJumping).toBe(true);
+    expect(mockPlayer.character.velocity.y).toBe(0);
+  });
+
+  test('handleInput should not jump in mid-air', () => {
+    mockPlayer.character.isOnGround = false;
+    mockPlayer.character.velocity.y = -2;
+
+    controller.handleInput({
+      forward: false,
+      backward: false,
+      left: false,
+      right: false,
+      up: true,
+      down: false
+    });
+
+    controller.update(0.016);
+
+    expect(mockPlayer.character.velocity.y).toBeLessThan(0);
   });
 
   test('handleInput should set sneaking when X is pressed', () => {

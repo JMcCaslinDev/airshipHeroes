@@ -240,6 +240,7 @@ export function createRenderer(options = {}) {
     scene,
     camera,
     renderer,
+    canvas,
     render,
     dispose,
     handleResize,

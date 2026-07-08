@@ -10,6 +10,7 @@ import { createRenderer } from './rendering/renderer.js';
 import { createGameState } from './core/gameState.js';
 import { createGameLoop } from './core/gameLoop.js';
 import { createInputHandler } from './input/inputHandler.js';
+import { createPointerLockManager } from './input/pointerLock.js';
 import { createMultiplayerClient } from './multiplayer/client.js';
 import { createResourceLoader } from './resources/resourceLoader.js';
 import { createPlayerModeController, createCrosshair } from './modes/playerMode.js';
@@ -55,9 +56,9 @@ const inputHandler = createInputHandler({
       playerModeController.handleMouseUp(event);
     }
   },
-  onMouseWheel: (delta) => {
+  onMouseWheel: (deltaY, deltaX, modifiers) => {
     if (gameState.mode === 'ship' && shipModeController) {
-      shipModeController.handleMouseWheel(delta);
+      shipModeController.handleMouseWheel(deltaY, deltaX, modifiers);
     }
   }
 });
@@ -77,6 +78,7 @@ let shipModeController = null;
 
 // Crosshair for player mode
 let crosshair = null;
+let pointerLock = null;
 
 // Track toggle key state to prevent multiple toggles per press
 let lastToggleState = false;
@@ -287,8 +289,17 @@ function startGame(username) {
     }
     
     // Add debug helpers to scene
-    addSceneDebugHelpers();
-    console.log('Debug helpers added to scene');
+    if (gameState.ui.showDebug) {
+      addSceneDebugHelpers();
+      console.log('Debug helpers added to scene');
+    }
+    
+    // Capture mouse on canvas for ship + player modes
+    const canvas = renderer.canvas;
+    inputHandler.bindElement(canvas, canvas);
+    pointerLock = createPointerLockManager(canvas, {
+      shouldCapture: () => document.getElementById('hud')?.style.display !== 'none'
+    });
     
     // Create mode controllers
     try {
@@ -309,18 +320,15 @@ function startGame(username) {
       
       // Create crosshair for player mode
       crosshair = createCrosshair();
-      console.log('Fresh crosshair created at game start');
+      crosshair.show();
+      console.log('Crosshair created at game start');
       
       // Start in ship mode
       gameState.mode = 'ship';
       shipModeController.activate();
       console.log('Ship mode activated');
       
-      // Hide crosshair in ship mode
-      if (crosshair) {
-        crosshair.hide();
-        console.log('Crosshair hidden for initial ship mode');
-      }
+      pointerLock?.request();
       
       // Force camera position update
       renderer.camera.position.set(0, 60, 20);
@@ -594,6 +602,10 @@ function loadDefaultShip(player) {
  * @param {Ship} ship - The ship to add helpers to
  */
 function addDebugHelpers(ship) {
+  if (!gameState.ui.showDebug) {
+    return;
+  }
+
   try {
     // Add axes helper to show ship orientation
     const axesHelper = new THREE.AxesHelper(10);
@@ -865,59 +877,22 @@ function toggleMode() {
   console.log('Toggling mode from', gameState.mode);
   
   if (gameState.mode === 'ship') {
-    // Switch to player mode
     gameState.mode = 'player';
     shipModeController.deactivate();
     playerModeController.activate();
-    
-    // CRITICAL: Always recreate the crosshair from scratch when entering player mode
-    console.log('Creating authentic Minecraft crosshair for player mode');
-    
-    // First, clean up any existing crosshair
-    if (crosshair) {
-      crosshair.destroy();
-      crosshair = null;
-    }
-    
-    // Remove any stray elements that might be left
-    const oldCrosshair = document.getElementById('crosshair');
-    if (oldCrosshair && oldCrosshair.parentNode) {
-      oldCrosshair.parentNode.removeChild(oldCrosshair);
-    }
-    
-    const oldContainer = document.getElementById('crosshair-container');
-    if (oldContainer && oldContainer.parentNode) {
-      oldContainer.parentNode.removeChild(oldContainer);
-    }
-    
-    // Create fresh Minecraft-style crosshair
-    crosshair = createCrosshair();
-    
-    // Force it to be visible immediately and again after a short delay
-    crosshair.show();
-    
-    // Also set a timeout as a fail-safe to ensure it appears
-    setTimeout(() => {
-      if (crosshair) {
-        crosshair.show();
-        console.log('Minecraft crosshair forced visible with timeout');
-      }
-    }, 50); // Shorter delay is enough
   } else {
-    // Switch to ship mode
     gameState.mode = 'ship';
     playerModeController.deactivate();
     shipModeController.activate();
-    
-    // Hide crosshair in ship mode
-    if (crosshair) {
-      console.log('Hiding crosshair for ship mode');
-      crosshair.hide();
-    }
   }
+
+  if (!crosshair) {
+    crosshair = createCrosshair();
+  }
+  crosshair.show();
   
-  // Update UI
   uiManager.updateModeIndicator(gameState.mode);
+  pointerLock?.request();
   console.log('Mode toggled to', gameState.mode);
 }
 
@@ -967,40 +942,11 @@ function update(deltaTime) {
       // Update controllers based on mode
       try {
         if (gameState.mode === 'ship' && shipModeController) {
-          // Ship mode
           shipModeController.handleInput(inputHandler.keys);
           shipModeController.update(deltaTime);
-          
-          // Ensure crosshair is hidden in ship mode
-          if (crosshair) {
-            crosshair.hide();
-          }
         } else if (gameState.mode === 'player' && playerModeController) {
-          // Player mode
           playerModeController.handleInput(inputHandler.keys);
           playerModeController.update(deltaTime);
-          
-          // Ensure crosshair is visible in player mode
-          if (crosshair) {
-            crosshair.show();
-            
-            // Check if crosshair exists and is visible
-            const crosshairElement = document.getElementById('crosshair');
-            if (!crosshairElement) {
-              console.log('Crosshair not found in DOM during update, recreating...');
-              if (crosshair) {
-                crosshair.destroy(); // Clean up any existing instance
-              }
-              crosshair = createCrosshair();
-              crosshair.show();
-            } else if (crosshairElement.style.display !== 'block') {
-              console.log('Crosshair exists but not visible, showing it...');
-              crosshairElement.style.display = 'block';
-              crosshairElement.style.visibility = 'visible';
-              crosshairElement.style.opacity = '1';
-            }
-          }
-          
           // Check if blocks were placed or broken and save the ship
           if (playerModeController.blocksChanged) {
             savePlayerShip(gameState.localPlayer);
