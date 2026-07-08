@@ -7,11 +7,11 @@
 
 import * as THREE from 'three';
 import ShipBlockManager from './ShipBlockManager.js';
-import ShipPhysics from './ShipPhysics.js';
 import ShipTransform from './ShipTransform.js';
 import ShipRenderer from './ShipRenderer.js';
 import ShipWeapons from './ShipWeapons.js';
 import ShipSerialization from './ShipSerialization.js';
+import { updateShipPhysics } from '../../physics/shipPhysics.js';
 
 class Ship {
   /**
@@ -22,12 +22,14 @@ class Ship {
     this.position = options.position || { x: 0, y: 100, z: 0 }; // Ship position in world
     this.rotation = options.rotation || 0; // Ship rotation (radians)
     this.velocity = { x: 0, y: 0, z: 0 }; // Current velocity
-    this.angularVelocity = 0; // Current turning speed
+    this.angularVelocity = 0;
+    this.bankAngle = 0;
     this.owner = options.owner || null; // Player who owns this ship
     this.name = options.name || 'Unnamed Ship';
     this.isSinking = false; // Whether the ship is currently sinking
-    this.sinkRate = 1; // Rate at which the ship sinks (blocks/second)
-    this.controls = { forward: false, backward: false, left: false, right: false, up: false, down: false }; // Control inputs
+    this.sinkRate = 0.5;
+    this.controls = { forward: false, backward: false, left: false, right: false, up: false, down: false };
+    this.worldManager = options.worldManager || null;
     
     // Group to hold all block meshes
     this.group = new THREE.Group();
@@ -48,7 +50,6 @@ class Ship {
     
     // Initialize sub-modules
     this.blockManager = new ShipBlockManager(this);
-    this.physics = new ShipPhysics(this);
     this.transform = new ShipTransform(this);
     this.renderer = new ShipRenderer(this);
     this.weapons = new ShipWeapons(this);
@@ -109,14 +110,6 @@ class Ship {
   }
 
   /**
-   * Apply thrust from all engine blocks
-   * @param {Object} controls - Control inputs {forward, backward, left, right, up, down}
-   */
-  applyThrust(controls) {
-    this.physics.applyThrust(controls);
-  }
-
-  /**
    * Fire all cannons facing a particular direction
    * @param {String} direction - The direction to fire ('forward', 'backward', 'left', 'right')
    * @param {THREE.Scene} scene - The scene to add projectiles to
@@ -132,29 +125,29 @@ class Ship {
    * @param {number} worldHeight - The maximum height of the world
    */
   update(deltaTime, worldHeight = 500) {
-    this.physics.update(deltaTime, worldHeight);
-    
+    updateShipPhysics(this, this.worldManager, deltaTime, worldHeight);
+
     // Update steering wheel's ship rotation if it exists
     if (this.steeringWheel) {
       this.steeringWheel.shipRotation = this.rotation;
     }
-    
+
     // Periodically clean up orphaned meshes (every 5 seconds)
     if (!this._lastCleanupTime) {
       this._lastCleanupTime = 0;
     }
-    
+
     this._lastCleanupTime += deltaTime;
     if (this._lastCleanupTime > 5) {
       this.renderer.cleanupOrphanedMeshes();
       this._lastCleanupTime = 0;
     }
-    
+
     // Periodically update block meshes (every 1 second)
     if (!this._lastMeshUpdateTime) {
       this._lastMeshUpdateTime = 0;
     }
-    
+
     this._lastMeshUpdateTime += deltaTime;
     if (this._lastMeshUpdateTime > 1) {
       this.renderer.updateBlockMeshes();

@@ -46,16 +46,12 @@ const inputHandler = createInputHandler({
     }
   },
   onMouseDown: (event) => {
-    if (gameState.mode === 'ship' && shipModeController) {
-      shipModeController.handleMouseDown(event);
-    } else if (gameState.mode === 'player' && playerModeController) {
+    if (gameState.mode === 'player' && playerModeController) {
       playerModeController.handleMouseDown(event);
     }
   },
   onMouseUp: (event) => {
-    if (gameState.mode === 'ship' && shipModeController && shipModeController.handleMouseUp) {
-      shipModeController.handleMouseUp(event);
-    } else if (gameState.mode === 'player' && playerModeController && playerModeController.handleMouseUp) {
+    if (gameState.mode === 'player' && playerModeController?.handleMouseUp) {
       playerModeController.handleMouseUp(event);
     }
   },
@@ -450,6 +446,27 @@ function ensureShipInScene(ship) {
 }
 
 /**
+ * Replace the player's ship and ensure the new one is in the scene.
+ * @param {Object} player - The player
+ * @param {Object} ship - The new ship
+ * @returns {Object|null} The new ship
+ */
+function replacePlayerShip(player, ship) {
+  if (!player || !ship) {
+    return null;
+  }
+
+  if (player.ship?.group?.parent) {
+    player.ship.group.parent.remove(player.ship.group);
+  }
+
+  player.ship = ship;
+  ship.worldManager = worldManager;
+  ensureShipInScene(ship);
+  return ship;
+}
+
+/**
  * Load a ship for a player from a ship definition
  * @param {Object} player - The player to load the ship for
  * @param {Object} shipDefinition - The ship definition to load
@@ -494,7 +511,7 @@ function loadShipForPlayer(player, shipDefinition) {
     ensureShipInScene(ship);
     
     // Set the ship for the player
-    player.ship = ship;
+    replacePlayerShip(player, ship);
     
     // Add debug helpers
     addDebugHelpers(ship);
@@ -543,24 +560,24 @@ function loadDefaultShip(player) {
     if (defaultShipDefinition && defaultShipDefinition.blocks && 
         Array.isArray(defaultShipDefinition.blocks) && defaultShipDefinition.blocks.length > 0) {
       console.log('Loading ship from default definition');
-      ship.loadFromDefinition(defaultShipDefinition, renderer.scene, resourceLoader);
+      ship.loadFromDefinition(defaultShipDefinition);
+
+      if (!ship.blockManager.blocks || ship.blockManager.blocks.length === 0) {
+        console.warn('Default ship definition produced no blocks, using built-in fallback');
+        return createFallbackShip(player);
+      }
     } else {
       // Otherwise, create a simple fallback ship
       console.warn('No valid default ship definition found, creating fallback ship');
-      createFallbackShip(player);
-      return player.ship; // Return the fallback ship
+      return createFallbackShip(player);
     }
     
-    // Ensure the ship is visible and in the scene
-    ensureShipInScene(ship);
-    
-    // Set the ship for the player
-    player.ship = ship;
+    replacePlayerShip(player, ship);
     
     // Add debug helpers
     addDebugHelpers(ship);
     
-    console.log('Default ship loaded successfully');
+    console.log(`Default ship loaded successfully with ${ship.blockManager.blocks.length} blocks`);
     
     return ship;
   } catch (error) {
@@ -686,11 +703,7 @@ function createFallbackShip(player) {
     // Force update the ship's renderer
     ship.renderer.updateBlockMeshes();
     
-    // Set the ship for the player
-    player.ship = ship;
-    
-    // Ensure the ship is visible and in the scene again after adding blocks
-    ship.ensureVisible(renderer.scene);
+    replacePlayerShip(player, ship);
     
     // Add debug helpers
     addDebugHelpers(ship);
@@ -948,6 +961,9 @@ function update(deltaTime) {
         lastToggleState = toggleState;
       }
       
+      // Keep PlayerControls state in sync with the central input handler
+      gameState.localPlayer.syncControlsFromInput(inputHandler.keys);
+
       // Update controllers based on mode
       try {
         if (gameState.mode === 'ship' && shipModeController) {

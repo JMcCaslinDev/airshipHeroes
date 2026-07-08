@@ -52,6 +52,8 @@ describe('Ship Mode Controller', () => {
           })
         },
         rotation: 0,
+        angularVelocity: 0,
+        velocity: { x: 0, y: 0, z: 0 },
         controls: {
           forward: false,
           backward: false,
@@ -161,43 +163,33 @@ describe('Ship Mode Controller', () => {
   });
   
   test('handleInput should set ship controls correctly for Q key (up)', () => {
-    // Create mock keys object with Q key pressed
-    const keys = {
+    controller.handleInput({
       forward: false,
       backward: false,
       left: false,
       right: false,
-      up: true,
-      down: false
-    };
-    
-    // Handle input
-    controller.handleInput(keys);
-    
-    // Check that up control is set
+      q: true,
+      e: false
+    });
+
     expect(mockPlayer.ship.controls.up).toBe(true);
     expect(mockPlayer.ship.controls.down).toBe(false);
   });
-  
+
   test('handleInput should set ship controls correctly for E key (down)', () => {
-    // Create mock keys object with E key pressed
-    const keys = {
+    controller.handleInput({
       forward: false,
       backward: false,
       left: false,
       right: false,
-      up: false,
-      down: true
-    };
-    
-    // Handle input
-    controller.handleInput(keys);
-    
-    // Check that down control is set
+      q: false,
+      e: true
+    });
+
     expect(mockPlayer.ship.controls.up).toBe(false);
     expect(mockPlayer.ship.controls.down).toBe(true);
   });
-  
+
   test('activate should set player mode to ship', () => {
     // Set player mode to something else
     mockPlayer.mode = 'player';
@@ -210,19 +202,36 @@ describe('Ship Mode Controller', () => {
   });
   
   test('deactivate should reset ship controls', () => {
-    // Set some controls
     mockPlayer.ship.controls.forward = true;
     mockPlayer.ship.controls.left = true;
-    
-    // Deactivate ship mode
+
     controller.deactivate();
-    
-    // Check that controls are reset
+
     expect(mockPlayer.ship.controls.forward).toBe(false);
     expect(mockPlayer.ship.controls.backward).toBe(false);
     expect(mockPlayer.ship.controls.left).toBe(false);
     expect(mockPlayer.ship.controls.right).toBe(false);
     expect(mockPlayer.ship.controls.up).toBe(false);
     expect(mockPlayer.ship.controls.down).toBe(false);
+  });
+
+  test('mouse move orbits camera without steering the ship', () => {
+    mockPlayer.ship.angularVelocity = 0;
+    mockCamera.lookAt.mockClear();
+
+    controller.handleMouseMove(50, 20);
+
+    expect(mockCamera.lookAt).toHaveBeenCalled();
+    expect(mockPlayer.ship.angularVelocity).toBe(0);
+  });
+
+  test('mouse wheel zooms camera in and out', () => {
+    const initialDistance = controller.cameraDistance;
+
+    controller.handleMouseWheel(-100);
+    expect(controller.cameraDistance).toBeLessThan(initialDistance);
+
+    controller.handleMouseWheel(200);
+    expect(controller.cameraDistance).toBeGreaterThan(initialDistance - 2);
   });
 }); 

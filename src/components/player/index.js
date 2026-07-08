@@ -61,11 +61,8 @@ class Player {
     // Create player character mesh
     this.character.createMesh(scene);
     
-    // Create a new ship for the player
-    this.ship = new Ship({
-      owner: this,
-      position: { x: 0, y: 100, z: 0 }
-    });
+    // Ship is created when the game starts in main.js
+    this.ship = null;
     
     // Initialize UI
     this.ui.init();
@@ -85,6 +82,27 @@ class Player {
     this.controls.setupEventListeners();
     
     console.log('Player initialized with inventory:', this.inventory.slots);
+  }
+
+  /**
+   * Sync PlayerControls state from the central input handler keys.
+   * The input handler is the single source of truth for keyboard state.
+   * @param {Object} keys - Key states from the input handler
+   */
+  syncControlsFromInput(keys) {
+    if (!keys) return;
+
+    const isShipMode = this.mode === 'ship';
+
+    this.controls.state.forward = !!keys.forward;
+    this.controls.state.backward = !!keys.backward;
+    this.controls.state.left = !!keys.left;
+    this.controls.state.right = !!keys.right;
+    this.controls.state.up = isShipMode ? !!keys.q : false;
+    this.controls.state.down = isShipMode ? !!keys.e : false;
+    this.controls.state.jump = !isShipMode && !!keys.up;
+    this.controls.state.sneak = !isShipMode && !!keys.down;
+    this.controls.state.fire = !!keys.fire;
   }
 
   /**
@@ -146,25 +164,7 @@ class Player {
     try {
       // Update ship controls in Ship Mode
       if (this.mode === 'ship' && this.ship) {
-        // Handle direct vertical movement
-        if (this.controls.state.up) {
-          // Move up at exactly 1 unit per second
-          this.ship.position.y += 1 * deltaTime;
-          if (this.ship.group) {
-            this.ship.group.position.y = this.ship.position.y;
-          }
-        } else if (this.controls.state.down) {
-          // Move down at exactly 1 unit per second
-          this.ship.position.y -= 1 * deltaTime;
-          if (this.ship.group) {
-            this.ship.group.position.y = this.ship.position.y;
-          }
-        }
-        
-        // Apply thrust for horizontal movement
-        this.ship.applyThrust(this.controls.state);
-        
-        // Fire cannons
+        // Vertical movement handled in shipPhysics via ship.controls (Q/E)
         if (this.controls.state.fire) {
           // Determine which direction to fire based on movement controls
           let fireDirection = null;
@@ -199,10 +199,7 @@ class Player {
         }
       }
       
-      // Update character in Player Mode
-      if (this.mode === 'player') {
-        this.character.update(deltaTime, this.controls.state, this.ship);
-      }
+      // Player mode movement is handled by playerModeController in main.js
       
       // Update camera
       updateCamera(this);

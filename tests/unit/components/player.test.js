@@ -165,18 +165,15 @@ describe('Player', () => {
     // In a real implementation, we would need to modify the mock to capture the state during the call
   });
   
-  test('should apply thrust in ship mode', () => {
+  test('should update ship in ship mode', () => {
     // Set player to ship mode
     player.mode = 'ship';
-    
-    // Set controls
-    player.controls.forward = true;
     
     // Update player
     player.update(0.1, mockScene);
     
-    // Check that applyThrust was called with the controls
-    expect(player.ship.applyThrust).toHaveBeenCalledWith(player.controls);
+    // Ship physics update runs each frame
+    expect(player.ship.update).toHaveBeenCalledWith(0.1);
   });
   
   test('should fire cannons when fire control is active', () => {
@@ -184,8 +181,8 @@ describe('Player', () => {
     player.mode = 'ship';
     
     // Set controls
-    player.controls.fire = true;
-    player.controls.forward = true;
+    player.controls.state.fire = true;
+    player.controls.state.forward = true;
     
     // Update player
     player.update(0.1, mockScene);
@@ -194,7 +191,7 @@ describe('Player', () => {
     expect(player.ship.fireCannons).toHaveBeenCalledWith('forward', mockScene);
     
     // Fire control should be reset
-    expect(player.controls.fire).toBe(false);
+    expect(player.controls.state.fire).toBe(false);
   });
   
   test('should save ship design to localStorage', () => {

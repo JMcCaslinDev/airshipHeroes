@@ -1,11 +1,16 @@
 /**
  * Ship Mode Module
- * 
- * Handles controls and camera for Ship Mode.
+ *
+ * Handles controls and third-person orbit camera for Ship Mode.
+ * Mouse orbits/zooms the camera; WASD + Q/E drive the ship.
  */
 
 import * as THREE from 'three';
-import { updateShipPhysics, applyForce, applyTorque } from '../physics/shipPhysics.js';
+
+const CAMERA_SENSITIVITY = 0.003;
+const MIN_CAMERA_DISTANCE = 5;
+const MAX_CAMERA_DISTANCE = 50;
+const DEFAULT_CAMERA_DISTANCE = 20;
 
 /**
  * Create a ship mode controller
@@ -15,213 +20,95 @@ import { updateShipPhysics, applyForce, applyTorque } from '../physics/shipPhysi
  * @returns {Object} The ship mode controller
  */
 export function createShipModeController(player, camera, world) {
-  // Controller state
   let active = false;
-  
-  // Camera settings
-  const cameraOffset = new THREE.Vector3(0, 10, 20);
-  const cameraLookOffset = new THREE.Vector3(0, 0, -20);
-  let cameraDistance = 20;
-  
-  /**
-   * Activate ship mode
-   */
+
+  // Orbit camera around ship (world space — independent of ship heading)
+  let cameraYaw = 0;
+  let cameraPitch = 0.35;
+  let cameraDistance = DEFAULT_CAMERA_DISTANCE;
+
   function activate() {
     active = true;
     player.mode = 'ship';
-    
-    // Hide character mesh
-    if (player.character && player.character.mesh) {
+
+    if (player.character?.mesh) {
       player.character.mesh.visible = false;
     }
-    
-    // Update camera
+
     updateCamera();
   }
-  
-  /**
-   * Deactivate ship mode
-   */
+
   function deactivate() {
     active = false;
+    if (player.ship) {
+      player.ship.controls = {
+        forward: false,
+        backward: false,
+        left: false,
+        right: false,
+        up: false,
+        down: false
+      };
+    }
   }
-  
-  /**
-   * Handle keyboard input
-   * @param {Object} keys - The key states
-   */
+
   function handleInput(keys) {
     if (!active || !player.ship) return;
-    
-    // Debug log for all keys
-    console.log("Ship mode input handler - All keys:", JSON.stringify(keys));
-    
-    // Set ship controls
+
     player.ship.controls = {
-      forward: keys.forward || keys.w,
-      backward: keys.backward || keys.s,
-      left: keys.left || keys.a,
-      right: keys.right || keys.d,
-      up: keys.q,
-      down: keys.e
+      forward: !!(keys.forward || keys.w),
+      backward: !!(keys.backward || keys.s),
+      left: !!(keys.left || keys.a),
+      right: !!(keys.right || keys.d),
+      up: !!keys.q,
+      down: !!keys.e
     };
-    
-    // Debug log to verify Q and E key states
-    console.log(`Ship controls - Q: ${keys.q}, E: ${keys.e}, Up: ${player.ship.controls.up}, Down: ${player.ship.controls.down}`);
-    
-    // Fire cannons
-    if (keys.fire) {
-      fireCannons();
-    }
-    
-    // Explicitly ignore inventory slot selection in ship mode
-    // This ensures number keys don't affect inventory in ship mode
-    // Reset any selected slot keys to prevent them from being processed when switching to player mode
-    if (keys.slot1 || keys.slot2 || keys.slot3 || keys.slot4 || keys.slot5 || 
-        keys.slot6 || keys.slot7 || keys.slot8 || keys.slot9) {
-      // Do nothing in ship mode - inventory selection is disabled
-      console.log("Ignoring inventory selection in ship mode");
-    }
   }
-  
-  /**
-   * Handle mouse movement
-   * @param {number} deltaX - The change in X position
-   * @param {number} deltaY - The change in Y position
-   */
+
   function handleMouseMove(deltaX, deltaY) {
     if (!active) return;
-    
-    // Rotate ship based on mouse movement
-    if (deltaX !== 0) {
-      const rotationAmount = deltaX * 0.01;
-      applyTorque(player.ship, -rotationAmount);
-    }
+
+    cameraYaw -= deltaX * CAMERA_SENSITIVITY;
+    cameraPitch -= deltaY * CAMERA_SENSITIVITY;
+    cameraPitch = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, cameraPitch));
+
+    updateCamera();
   }
-  
-  /**
-   * Handle mouse wheel
-   * @param {number} delta - The wheel delta
-   */
+
   function handleMouseWheel(delta) {
     if (!active) return;
-    
-    // Adjust camera distance
-    cameraDistance += delta * 0.01;
-    cameraDistance = Math.max(5, Math.min(20, cameraDistance));
-    
+
+    cameraDistance += delta * 0.02;
+    cameraDistance = Math.max(MIN_CAMERA_DISTANCE, Math.min(MAX_CAMERA_DISTANCE, cameraDistance));
+
     updateCamera();
   }
-  
-  /**
-   * Update the camera position
-   */
+
   function updateCamera() {
-    if (!active || !player.ship) {
-      console.log('Ship mode camera update skipped - not active or no ship');
-      return;
-    }
-    
-    try {
-      // Calculate camera position
-      const shipPosition = new THREE.Vector3(
-        player.ship.position.x,
-        player.ship.position.y,
-        player.ship.position.z
-      );
-      
-      console.log('Ship position:', shipPosition);
-      
-      // Calculate camera offset based on ship rotation
-      const rotatedOffset = cameraOffset.clone();
-      rotatedOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), player.ship.rotation);
-      
-      // Scale offset by camera distance
-      rotatedOffset.normalize().multiplyScalar(cameraDistance);
-      
-      // Set camera position
-      camera.position.copy(shipPosition).add(rotatedOffset);
-      
-      console.log('Camera position updated to:', camera.position);
-      
-      // Calculate look target
-      const lookOffset = cameraLookOffset.clone();
-      lookOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), player.ship.rotation);
-      
-      const lookTarget = shipPosition.clone().add(lookOffset);
-      
-      // Make camera look at target
-      camera.lookAt(lookTarget);
-      
-      console.log('Camera looking at:', lookTarget);
-      
-      // Force camera to be above ground
-      if (camera.position.y < 5) {
-        camera.position.y = 5;
-      }
-    } catch (error) {
-      console.error('Error updating camera in ship mode:', error);
-      
-      // Fallback camera position
-      camera.position.set(0, 60, 20);
-      camera.lookAt(0, 50, 0);
-    }
-  }
-  
-  /**
-   * Fire cannons
-   */
-  function fireCannons() {
     if (!active || !player.ship) return;
-    
-    // Find all cannon blocks on the ship
-    const cannonBlocks = player.ship.blockManager.blocks.filter(block => block.type === 'cannon');
-    
-    // Fire each cannon
-    cannonBlocks.forEach(cannon => {
-      // Calculate cannon position in world space
-      const cannonPosition = new THREE.Vector3(
-        player.ship.position.x + cannon.position.x,
-        player.ship.position.y + cannon.position.y,
-        player.ship.position.z + cannon.position.z
-      );
-      
-      // Calculate firing direction based on ship rotation
-      const firingDirection = new THREE.Vector3(0, 0, -1);
-      firingDirection.applyAxisAngle(new THREE.Vector3(0, 1, 0), player.ship.rotation);
-      
-      // Create projectile
-      createProjectile(cannonPosition, firingDirection);
-    });
+
+    const shipPosition = new THREE.Vector3(
+      player.ship.position.x,
+      player.ship.position.y,
+      player.ship.position.z
+    );
+
+    const cosPitch = Math.cos(cameraPitch);
+    const offset = new THREE.Vector3(
+      Math.sin(cameraYaw) * cosPitch * cameraDistance,
+      Math.sin(cameraPitch) * cameraDistance,
+      Math.cos(cameraYaw) * cosPitch * cameraDistance
+    );
+
+    camera.position.copy(shipPosition).add(offset);
+    camera.lookAt(shipPosition);
   }
-  
-  /**
-   * Create a projectile
-   * @param {THREE.Vector3} position - The starting position
-   * @param {THREE.Vector3} direction - The direction
-   */
-  function createProjectile(position, direction) {
-    // This would be implemented in a projectile system
-    console.log('Fire projectile from', position, 'in direction', direction);
-  }
-  
-  /**
-   * Update the controller
-   * @param {number} deltaTime - The time since the last update in seconds
-   */
-  function update(deltaTime) {
+
+  function update() {
     if (!active || !player.ship) return;
-    
-    // Vertical movement is now handled directly in the Player class
-    // We're not handling it here anymore to avoid conflicts
-    
-    // Update ship physics
-    updateShipPhysics(player.ship, world, deltaTime);
-    
-    // Update camera
     updateCamera();
   }
-  
+
   return {
     activate,
     deactivate,
@@ -238,6 +125,9 @@ export function createShipModeController(player, camera, world) {
     },
     get camera() {
       return camera;
+    },
+    get cameraDistance() {
+      return cameraDistance;
     }
   };
 }
@@ -245,25 +135,20 @@ export function createShipModeController(player, camera, world) {
 /**
  * Create a third-person camera for ship mode
  * @param {THREE.Scene} scene - The Three.js scene
- * @param {Object} ship - The ship object
  * @returns {THREE.Camera} - The third-person camera
  */
-export function createShipCamera(scene, ship) {
-  // Create camera
-  const camera = new THREE.PerspectiveCamera(
-    75, // FOV
-    window.innerWidth / window.innerHeight, // Aspect ratio
-    0.1, // Near plane
-    1000 // Far plane
+export function createShipCamera(scene) {
+  const cam = new THREE.PerspectiveCamera(
+    75,
+    window.innerWidth / window.innerHeight,
+    0.1,
+    1000
   );
-  
-  // Set initial position
-  camera.position.set(0, 5, 10);
-  
-  // Add to scene
-  scene.add(camera);
-  
-  return camera;
+
+  cam.position.set(0, 5, 10);
+  scene.add(cam);
+
+  return cam;
 }
 
 /**
@@ -272,103 +157,78 @@ export function createShipCamera(scene, ship) {
  * @returns {Object} - The HUD object
  */
 export function createShipHUD(player) {
-  // Create HUD elements
   const hud = {
     player,
     elements: {},
-    
-    /**
-     * Initialize the HUD
-     */
+
     init() {
-      // Create speed indicator
       this.elements.speed = document.createElement('div');
       this.elements.speed.id = 'ship-speed';
-      this.elements.speed.style.position = 'absolute';
-      this.elements.speed.style.bottom = '20px';
-      this.elements.speed.style.left = '20px';
-      this.elements.speed.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
-      this.elements.speed.style.color = 'white';
-      this.elements.speed.style.padding = '10px';
-      this.elements.speed.style.borderRadius = '5px';
+      Object.assign(this.elements.speed.style, {
+        position: 'absolute',
+        bottom: '20px',
+        left: '20px',
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        color: 'white',
+        padding: '10px',
+        borderRadius: '5px'
+      });
       this.elements.speed.textContent = 'Speed: 0';
-      
-      // Create altitude indicator
+
       this.elements.altitude = document.createElement('div');
       this.elements.altitude.id = 'ship-altitude';
-      this.elements.altitude.style.position = 'absolute';
-      this.elements.altitude.style.bottom = '20px';
-      this.elements.altitude.style.right = '20px';
-      this.elements.altitude.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
-      this.elements.altitude.style.color = 'white';
-      this.elements.altitude.style.padding = '10px';
-      this.elements.altitude.style.borderRadius = '5px';
+      Object.assign(this.elements.altitude.style, {
+        position: 'absolute',
+        bottom: '20px',
+        right: '20px',
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        color: 'white',
+        padding: '10px',
+        borderRadius: '5px'
+      });
       this.elements.altitude.textContent = 'Altitude: 0';
-      
-      // Add elements to DOM
+
       document.body.appendChild(this.elements.speed);
       document.body.appendChild(this.elements.altitude);
-      
-      // Hide initially
       this.hide();
     },
-    
-    /**
-     * Show the HUD
-     */
+
     show() {
       for (const element of Object.values(this.elements)) {
         element.style.display = 'block';
       }
     },
-    
-    /**
-     * Hide the HUD
-     */
+
     hide() {
       for (const element of Object.values(this.elements)) {
         element.style.display = 'none';
       }
     },
-    
-    /**
-     * Update the HUD
-     */
+
     update() {
-      if (!this.player || !this.player.ship) return;
-      
-      // Show HUD if in ship mode
+      if (!this.player?.ship) return;
+
       if (this.player.mode === 'ship') {
         this.show();
       } else {
         this.hide();
         return;
       }
-      
-      // Update speed indicator
+
       const speed = Math.sqrt(
-        Math.pow(this.player.ship.velocity.x, 2) +
-        Math.pow(this.player.ship.velocity.z, 2)
+        this.player.ship.velocity.x ** 2 + this.player.ship.velocity.z ** 2
       ).toFixed(1);
-      
+
       this.elements.speed.textContent = `Speed: ${speed}`;
-      
-      // Update altitude indicator
-      const altitude = Math.floor(this.player.ship.position.y);
-      this.elements.altitude.textContent = `Altitude: ${altitude}`;
+      this.elements.altitude.textContent = `Altitude: ${Math.floor(this.player.ship.position.y)}`;
     },
-    
-    /**
-     * Destroy the HUD
-     */
+
     destroy() {
       for (const element of Object.values(this.elements)) {
-        if (element.parentNode) {
-          element.parentNode.removeChild(element);
-        }
+        element.parentNode?.removeChild(element);
       }
     }
   };
-  
+
   return hud;
-} 
+}

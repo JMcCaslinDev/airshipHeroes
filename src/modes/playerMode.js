@@ -5,7 +5,6 @@
  */
 
 import * as THREE from 'three';
-import BlockFactory from '../blocks/blockFactory.js';
 
 /**
  * Create a player mode controller
@@ -29,9 +28,6 @@ export function createPlayerModeController(player, camera) {
     jumpVelocity: 8.0,
     moveSpeed: 2.5,
     
-    // Raycaster for block placement and breaking
-    raycaster: new THREE.Raycaster(),
-    
     // Mouse button states to prevent multiple actions per click
     leftMouseDown: false,
     rightMouseDown: false,
@@ -39,11 +35,6 @@ export function createPlayerModeController(player, camera) {
     blockActionTimeout: null
   };
   
-  // Initialize raycaster with proper settings
-  state.raycaster.near = 0.1;
-  state.raycaster.far = state.maxPlaceDistance;
-  state.raycaster.precision = 0.1;
-
   // Add a flag to track if blocks have been changed
   let blocksChanged = false;
   
@@ -79,11 +70,11 @@ export function createPlayerModeController(player, camera) {
       
       if (controlBlock) {
         console.log('Found control block at position:', controlBlock.position);
-        
-        // Position player on top of the control block
-        player.character.position.x = player.ship.position.x + controlBlock.position.x;
-        player.character.position.y = player.ship.position.y + controlBlock.position.y + 1.0; // Stand on top of the block
-        player.character.position.z = player.ship.position.z + controlBlock.position.z;
+
+        const worldPos = player.ship.getBlockWorldPosition(controlBlock);
+        player.character.position.x = worldPos.x;
+        player.character.position.y = worldPos.y + 1.0;
+        player.character.position.z = worldPos.z;
         
         // Update character mesh position
         if (player.character.mesh) {
@@ -406,58 +397,57 @@ export function createPlayerModeController(player, camera) {
   }
   
   /**
+   * Sync player state used by BlockInteractions before a block action
+   */
+  function syncPlayerForBlockAction() {
+    player.cameraRotation.x = state.cameraRotation.x;
+    player.cameraRotation.y = state.cameraRotation.y;
+    player.selectedBlock = player.inventory.getSelectedBlock();
+    player.controls.blockInteractions.maxPlaceDistance = state.maxPlaceDistance;
+  }
+
+  /**
+   * Delegate place/break to BlockInteractions (rotation-aware ship-local grid)
+   * @param {'place'|'break'} action
+   */
+  function performBlockAction(action) {
+    if (!player.controls?.blockInteractions) return false;
+    syncPlayerForBlockAction();
+    const blockInteractions = player.controls.blockInteractions;
+    const success = action === 'break'
+      ? blockInteractions.breakBlock()
+      : blockInteractions.placeBlock();
+    if (success) {
+      blocksChanged = true;
+    }
+    return success;
+  }
+
+  /**
    * Handle mouse down
    * @param {MouseEvent} event - The mouse event
    */
   function handleMouseDown(event) {
-    console.log(`Mouse down event: button=${event.button}, active=${state.active}, leftMouseDown=${state.leftMouseDown}, rightMouseDown=${state.rightMouseDown}, processingBlockAction=${state.processingBlockAction}`);
-    
-    if (!state.active) {
-      console.log("Player mode not active, ignoring mouse down");
-      return;
-    }
-    
-    // Prevent default behavior to avoid text selection and context menus
+    if (!state.active) return;
+
     event.preventDefault();
     event.stopPropagation();
-    
-    // Left click: break block
+
     if (event.button === 0) {
-      // Only process if we haven't already processed a left click
       if (!state.leftMouseDown && !state.processingBlockAction) {
-        console.log("Left mouse button pressed - breaking block");
         state.leftMouseDown = true;
         state.processingBlockAction = true;
-        
-        // Add a tiny delay to ensure we're not catching multiple events
-        requestAnimationFrame(() => {
-          breakBlock();
-        });
-      } else {
-        console.log("Left mouse already down or processing action - ignoring");
+        requestAnimationFrame(() => performBlockAction('break'));
       }
       return;
     }
-    
-    // Right click: place block
+
     if (event.button === 2) {
-      console.log("Right mouse button detected");
-      
-      // Only process if we haven't already processed a right click
       if (!state.rightMouseDown && !state.processingBlockAction) {
-        console.log("Right mouse button pressed - placing block");
         state.rightMouseDown = true;
         state.processingBlockAction = true;
-        
-        // Add a tiny delay to ensure we're not catching multiple events
-        requestAnimationFrame(() => {
-          console.log("Calling placeBlock from requestAnimationFrame");
-          placeBlock();
-        });
-      } else {
-        console.log(`Right mouse already down or processing action - ignoring. rightMouseDown=${state.rightMouseDown}, processingBlockAction=${state.processingBlockAction}`);
+        requestAnimationFrame(() => performBlockAction('place'));
       }
-      return;
     }
   }
   
@@ -503,495 +493,6 @@ export function createPlayerModeController(player, camera) {
     }
   }
   
-  /**
-   * Place a block
-   */
-  function placeBlock() {
-    console.log("placeBlock function called");
-    
-    if (state.processingBlockAction) {
-      console.log("Already processing a block action, ignoring");
-      return;
-    }
-    
-    state.processingBlockAction = true; // Set the flag to prevent multiple calls
-    console.log("Processing block action started");
-    
-    try {
-      // Get selected block type from inventory
-      const selectedSlot = player.inventory.selectedSlot;
-      const inventorySlot = player.inventory.slots[selectedSlot];
-      
-      console.log("Inventory check:", {
-        selectedSlot,
-        inventorySlot: inventorySlot ? {
-          type: inventorySlot.type,
-          count: inventorySlot.count
-        } : null
-      });
-      
-      if (!inventorySlot || !inventorySlot.type || inventorySlot.count <= 0) {
-        console.log('No block selected or no blocks left in inventory');
-        state.processingBlockAction = false;
-        return;
-      }
-      
-      const blockType = inventorySlot.type;
-      console.log(`Attempting to place block of type: ${blockType}`);
-      
-      // Get the ray origin and direction from the camera
-      const origin = new THREE.Vector3(
-        player.character.position.x,
-        player.character.position.y + state.cameraHeight,
-        player.character.position.z
-      );
-      
-      const direction = new THREE.Vector3(
-        -Math.sin(state.cameraRotation.y) * Math.cos(state.cameraRotation.x),
-        Math.sin(state.cameraRotation.x),
-        -Math.cos(state.cameraRotation.y) * Math.cos(state.cameraRotation.x)
-      ).normalize();
-      
-      // Create a fresh raycaster for this operation
-      const placementRaycaster = new THREE.Raycaster(origin, direction);
-      placementRaycaster.near = 0.001; // Start extremely close to avoid self-intersection
-      placementRaycaster.far = state.maxPlaceDistance;
-      placementRaycaster.precision = 0.0001; // Extremely high precision for accurate block placement
-      
-      console.log("Raycaster set up:", {
-        origin: JSON.stringify(origin),
-        direction: JSON.stringify(direction),
-        far: state.maxPlaceDistance,
-        precision: placementRaycaster.precision
-      });
-      
-      // Validate ship exists
-      if (!player.ship || !player.ship.group) {
-        console.log('No ship or ship group available');
-        return;
-      }
-      
-      // Create a filtered list of all block meshes in the ship
-      const blockMeshes = [];
-      player.ship.group.children.forEach(child => {
-        if (child.isMesh && child.userData && child.userData.isBlock) {
-          // Skip any meshes without position data - these can't be processed properly
-          if (child.userData.gridPosition || (child.userData.block && child.userData.block.position)) {
-            blockMeshes.push(child);
-          }
-        }
-      });
-      
-      console.log(`Found ${blockMeshes.length} valid block meshes to check for intersection`);
-      
-      // Pre-check: if no blocks, we can't place against anything
-      if (blockMeshes.length === 0) {
-        console.log('No valid block meshes found, nothing to place against');
-        return;
-      }
-      
-      // Perform raycasting only on valid block meshes
-      const intersects = placementRaycaster.intersectObjects(blockMeshes, false);
-      
-      console.log(`Raycasting results: ${intersects.length} intersections found`);
-      
-      // No intersections found - log and exit
-      if (intersects.length === 0) {
-        console.log('No intersections found with block meshes');
-        state.processingBlockAction = false;
-        return;
-      }
-      
-      // Only consider the first (closest) intersection
-      const intersect = intersects[0];
-      console.log(`Found intersection at distance ${intersect.distance.toFixed(4)} with object:`, {
-        type: intersect.object.userData.type,
-        position: intersect.object.userData.gridPosition || 
-                 (intersect.object.userData.block ? intersect.object.userData.block.position : 'unknown')
-      });
-      
-      // Check if the block is within reach
-      if (intersect.distance > state.maxPlaceDistance) {
-        console.log(`Too far to place block (${intersect.distance.toFixed(4)} > ${state.maxPlaceDistance})`);
-        state.processingBlockAction = false;
-        return;
-      }
-      
-      // Calculate position for new block using the face normal
-      const normal = intersect.face.normal.clone();
-      normal.transformDirection(intersect.object.matrixWorld);
-      
-      // Calculate the exact position where the block should be placed
-      const intersectPoint = intersect.point.clone();
-      const blockSize = 1; // Size of a block
-      
-      // Offset the position by a tiny amount in the normal direction to avoid floating point issues
-      const epsilon = 0.001;
-      intersectPoint.add(normal.multiplyScalar(epsilon));
-      
-      // Round to nearest block position
-      const newBlockPosition = {
-        x: Math.round(intersectPoint.x),
-        y: Math.round(intersectPoint.y),
-        z: Math.round(intersectPoint.z)
-      };
-      
-      // Validate the position is not occupied
-      const existingBlock = player.ship.blockManager.blocks.find(block => 
-        block.position.x === newBlockPosition.x &&
-        block.position.y === newBlockPosition.y &&
-        block.position.z === newBlockPosition.z
-      );
-      
-      if (existingBlock) {
-        console.log('Position already occupied by a block');
-        state.processingBlockAction = false;
-        return;
-      }
-      
-      // Convert to ship-local coordinates
-      const localPosition = player.ship.worldToLocalPosition(newBlockPosition);
-      
-      // Store the current number of blocks for verification
-      const initialBlockCount = player.ship.blockManager.blocks.length;
-      
-      // Validate the position isn't already occupied
-      // Check both the ship's blocks array and the scene
-      const blockAtPosition = player.ship.getBlockAtLocalPosition(localPosition);
-      
-      if (blockAtPosition) {
-        console.log('Position already occupied by a block in the ship');
-        return;
-      }
-      
-      // Also check for mesh overlap by checking exact grid positions
-      let meshAtPosition = false;
-      player.ship.group.children.forEach(child => {
-        if (child.isMesh && child.userData && child.userData.isBlock) {
-          const meshPos = child.userData.gridPosition || 
-                         (child.userData.block ? child.userData.block.position : null);
-          
-          if (meshPos && 
-              meshPos.x === localPosition.x && 
-              meshPos.y === localPosition.y && 
-              meshPos.z === localPosition.z) {
-            meshAtPosition = true;
-          }
-        }
-      });
-      
-      if (meshAtPosition) {
-        console.log('Position already occupied by a mesh in the scene');
-        return;
-      }
-      
-      // Create the block using BlockFactory
-      const block = BlockFactory.createBlock(
-        blockType,
-        localPosition,
-        { rotation: 0 }
-      );
-      
-      if (!block) {
-        console.error(`Failed to create block of type ${blockType}`);
-        state.processingBlockAction = false;
-        return;
-      }
-      
-      console.log(`Created block of type ${blockType} at local position:`, localPosition);
-      
-      // Create mesh for the block with proper textures
-      if (window.resourceLoader) {
-        block.createMesh(player.ship.group, window.resourceLoader);
-        console.log(`Created mesh with textures from resource loader`);
-      } else {
-        console.warn('Resource loader not available, block may not have textures');
-        // Fallback to creating a mesh with a color
-        const geometry = new THREE.BoxGeometry(1, 1, 1);
-        const material = new THREE.MeshStandardMaterial({
-          color: getBlockColor(blockType),
-          roughness: 0.7,
-          metalness: 0.2
-        });
-        
-        block.mesh = new THREE.Mesh(geometry, material);
-        block.mesh.position.set(localPosition.x, localPosition.y, localPosition.z);
-        block.mesh.castShadow = true;
-        block.mesh.receiveShadow = true;
-        
-        // Set userData for the mesh
-        block.mesh.userData.block = block;
-        block.mesh.userData.isBlock = true;
-        block.mesh.userData.type = block.type;
-        block.mesh.userData.gridPosition = { ...localPosition };
-        
-        player.ship.group.add(block.mesh);
-        console.log(`Created mesh with fallback color`);
-      }
-      
-      // Add block to ship's blocks array
-      player.ship.blockManager.addBlock(block, window.resourceLoader);
-      
-      console.log(`Added block to ship's blockManager. Block mesh exists: ${!!block.mesh}`);
-      
-      // Verify only one block was added
-      const finalBlockCount = player.ship.blockManager.blocks.length;
-      if (finalBlockCount !== initialBlockCount + 1) {
-        console.warn(`Expected to add 1 block, but block count changed from ${initialBlockCount} to ${finalBlockCount}`);
-      }
-      
-      // Remove block from inventory using player's method if available
-      if (typeof player.removeFromInventory === 'function') {
-        player.removeFromInventory(selectedSlot);
-      } else {
-        // Use the inventory's removeItem method
-        player.inventory.removeItem(selectedSlot, 1);
-      }
-      
-      console.log(`Successfully placed ${blockType} block at position:`, localPosition);
-      
-      // Fix any texture issues that might have occurred
-      if (typeof player.ship.fixBlockTextureIssues === 'function') {
-        player.ship.fixBlockTextureIssues();
-      } else if (player.ship.renderer && typeof player.ship.renderer.fixBlockTextureIssues === 'function') {
-        player.ship.renderer.fixBlockTextureIssues();
-      }
-      
-      // Save ship to localStorage if shipStorage is available
-      if (player.shipStorage && player.username) {
-        try {
-          const shipDefinition = player.ship.serialize();
-          player.shipStorage.saveShip(player.username, shipDefinition);
-          console.log("Ship saved to localStorage after block placement");
-        } catch (error) {
-          console.error("Error saving ship to localStorage:", error);
-        }
-      }
-      
-      // Set the blocks changed flag
-      blocksChanged = true;
-      
-      console.log("Block placement completed successfully");
-    } catch (error) {
-      console.error('Error placing block:', error);
-    } finally {
-      // Reset the processing flag after a short delay to prevent rapid re-clicks
-      setTimeout(() => {
-        state.processingBlockAction = false;
-        console.log("Block action processing flag reset");
-      }, 200);
-    }
-  }
-  
-  /**
-   * Break a block
-   */
-  function breakBlock() {
-    if (state.processingBlockAction) {
-      console.log("Already processing a block action, ignoring");
-      return;
-    }
-    
-    try {
-      // Get the ray origin and direction from the camera
-      const origin = new THREE.Vector3(
-        player.character.position.x,
-        player.character.position.y + state.cameraHeight,
-        player.character.position.z
-      );
-      
-      const direction = new THREE.Vector3(
-        -Math.sin(state.cameraRotation.y) * Math.cos(state.cameraRotation.x),
-        Math.sin(state.cameraRotation.x),
-        -Math.cos(state.cameraRotation.y) * Math.cos(state.cameraRotation.x)
-      ).normalize();
-      
-      // Create a fresh raycaster for this operation
-      const breakRaycaster = new THREE.Raycaster(origin, direction);
-      breakRaycaster.near = 0.001; // Start extremely close to avoid self-intersection
-      breakRaycaster.far = state.maxPlaceDistance;
-      breakRaycaster.precision = 0.0001; // Extremely high precision for accurate block selection
-      
-      // Find intersections with ship blocks
-      if (!player.ship || !player.ship.group) {
-        console.log('No ship or ship group available');
-        state.processingBlockAction = false;
-        return;
-      }
-      
-      // Create a filtered list of all block meshes in the ship
-      const blockMeshes = [];
-      player.ship.group.children.forEach(child => {
-        if (child.isMesh && child.userData && child.userData.isBlock) {
-          // Skip any meshes without position data - these can't be processed properly
-          if (child.userData.gridPosition || (child.userData.block && child.userData.block.position)) {
-            blockMeshes.push(child);
-          }
-        }
-      });
-      
-      // Store the current number of blocks for verification
-      const initialBlockCount = player.ship.blockManager.blocks.length;
-      
-      // Perform raycasting only on valid block meshes
-      const intersects = breakRaycaster.intersectObjects(blockMeshes, false);
-      
-      if (intersects.length === 0) {
-        console.log('No intersections found with block meshes');
-        state.processingBlockAction = false;
-        return;
-      }
-      
-      // Only consider the first (closest) intersection
-      const intersect = intersects[0];
-      
-      if (intersect.distance > state.maxPlaceDistance) {
-        console.log(`Block too far to break (${intersect.distance.toFixed(4)} > ${state.maxPlaceDistance})`);
-        state.processingBlockAction = false;
-        return;
-      }
-      
-      const blockMesh = intersect.object;
-      
-      if (!blockMesh.userData) {
-        console.log('No userData found on mesh');
-        state.processingBlockAction = false;
-        return;
-      }
-      
-      // Extract block information
-      let block = null;
-      let blockPosition = null;
-      
-      if (blockMesh.userData.block) {
-        block = blockMesh.userData.block;
-        blockPosition = { ...block.position }; // Create a copy to avoid reference issues
-      } else if (blockMesh.userData.gridPosition) {
-        blockPosition = { ...blockMesh.userData.gridPosition }; // Create a copy
-      } else {
-        console.log('No block data or grid position found on mesh');
-        state.processingBlockAction = false;
-        return;
-      }
-      
-      // Don't allow breaking the control block
-      if (block && block.type === 'control') {
-        console.log('Cannot break control block - critical ship component');
-        state.processingBlockAction = false;
-        return;
-      }
-      
-      // Store the mesh ID for cleanup validation
-      const meshId = blockMesh.id;
-      
-      // Use the ship's breakBlock method to remove the block
-      const brokenBlock = player.ship.breakBlock(blockPosition);
-      
-      if (brokenBlock) {
-        // Add block to inventory
-        addBlockToInventory(brokenBlock.type);
-        console.log(`Successfully broke ${brokenBlock.type} block`);
-        
-        // Set the blocks changed flag
-        blocksChanged = true;
-        
-        // Verify only one block was removed
-        const finalBlockCount = player.ship.blockManager.blocks.length;
-        if (finalBlockCount !== initialBlockCount - 1) {
-          console.warn(`Block count mismatch: ${initialBlockCount} -> ${finalBlockCount}`);
-          // Attempt to clean up any duplicate removals
-          player.ship.validateBlockCount();
-        }
-        
-        // Double-check that the mesh was removed from the scene
-        let meshStillExists = false;
-        player.ship.group.children.forEach(child => {
-          if (child.id === meshId) {
-            meshStillExists = true;
-            console.log('Mesh still exists after breaking block, removing manually');
-            player.ship.group.remove(child);
-          }
-        });
-      } else {
-        console.log('Failed to break block at position', blockPosition);
-      }
-    } catch (error) {
-      console.error('Error breaking block:', error);
-    } finally {
-      // Don't reset the processing flag here - it will be reset by the mouseup handler
-    }
-  }
-  
-  /**
-   * Add a block to the inventory
-   * @param {string} blockType - The type of block to add
-   */
-  function addBlockToInventory(blockType) {
-    console.log(`Adding ${blockType} to inventory`);
-    
-    // Use the player's addToInventory method if available
-    if (typeof player.addToInventory === 'function') {
-      player.addToInventory({ type: blockType });
-      console.log(`Used player.addToInventory to add ${blockType}`);
-      return;
-    }
-    
-    // Fallback implementation if player.addToInventory is not available
-    // Find existing slot with this block type
-    let slot = player.inventory.slots.find(slot => 
-      slot && slot.type === blockType && (slot.count < 64 || !slot.count)
-    );
-    
-    if (slot) {
-      // Add to existing slot
-      if (!slot.count) slot.count = 1;
-      else slot.count++;
-      console.log(`Added to existing slot, new count: ${slot.count}`);
-    } else {
-      // Find empty slot
-      slot = player.inventory.slots.find(slot => !slot || !slot.type);
-      
-      if (slot) {
-        // Add to empty slot
-        if (!slot) {
-          player.inventory.slots[player.inventory.slots.indexOf(null)] = { type: blockType, count: 1 };
-        } else {
-          slot.type = blockType;
-          slot.count = 1;
-        }
-        console.log(`Added to empty slot: ${blockType}`);
-      } else {
-        console.log('Inventory full');
-      }
-    }
-    
-    // Update inventory UI if needed
-    if (typeof player.updateInventoryUI === 'function') {
-      player.updateInventoryUI();
-    }
-  }
-  
-  /**
-   * Get the color for a block type
-   * @param {string} blockType - The block type
-   * @returns {number} The color as a hex value
-   */
-  function getBlockColor(blockType) {
-    switch (blockType) {
-      case 'wood':
-        return 0x8B4513;
-      case 'stone':
-        return 0x808080;
-      case 'lift':
-        return 0xFFD700;
-      case 'cannon':
-        return 0x444444;
-      case 'control':
-        return 0x654321;
-      default:
-        return 0xFFFFFF;
-    }
-  }
   
   /**
    * Update the camera position

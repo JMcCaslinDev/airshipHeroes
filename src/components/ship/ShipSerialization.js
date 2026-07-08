@@ -52,35 +52,29 @@ class ShipSerialization {
       this.ship.group.rotation.y = this.ship.rotation;
     }
     
-    // Create blocks - use static method instead of instantiating
-    for (const blockDef of definition.blocks) {
+    // Create blocks (supports both {position} and {x,y,z} definition formats)
+    const blocks = BlockFactory.createBlocksFromShipDefinition(definition);
+    const textureLoader = window.resourceLoader || options.textureLoader;
+
+    for (const block of blocks) {
       try {
-        const block = BlockFactory.createBlock(
-          blockDef.type,
-          blockDef.position,
-          {
-            rotation: blockDef.rotation || 0,
-            health: blockDef.health
-          }
-        );
-        
-        if (block) {
-          this.ship.blockManager.addBlock(block, window.resourceLoader);
-          
-          // If it's a steering wheel or control block, store a reference
-          if (blockDef.type === 'steeringWheel' || blockDef.type === 'control') {
-            this.ship.steeringWheel = block;
-          }
-          
-          console.log(`Added ${blockDef.type} block to ship`);
-        } else {
-          console.warn(`Failed to create block of type ${blockDef.type}`);
+        this.ship.blockManager.addBlock(block, textureLoader);
+
+        if (block.type === 'steeringWheel' || block.type === 'control') {
+          this.ship.steeringWheel = block;
         }
+
+        console.log(`Added ${block.type} block to ship`);
       } catch (error) {
-        console.error(`Error creating block: ${error.message}`);
+        console.error(`Error adding block: ${error.message}`);
       }
     }
-    
+
+    // Hide the debug placeholder once real blocks are loaded
+    if (this.ship.debugMesh && this.ship.blockManager.blocks.length > 0) {
+      this.ship.debugMesh.visible = false;
+    }
+
     console.log(`Loaded ${this.ship.blockManager.blocks.length} blocks`);
     
     // Update block meshes to ensure they're positioned correctly

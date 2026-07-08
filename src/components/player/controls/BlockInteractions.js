@@ -81,31 +81,20 @@ class BlockInteractions {
     
     const { eyePosition, lookDirection } = this.getEyePositionAndDirection();
     
-    // Cast ray to find where to place the block
     const raycaster = new THREE.Raycaster(eyePosition, lookDirection);
     raycaster.far = this.maxPlaceDistance;
     
-    // Check if the ship exists and has blocks
-    if (this.player.ship && this.player.ship.blockManager && this.player.ship.blockManager.blocks.length > 0) {
-      // Try to place block adjacent to existing ship
-      const placed = this.handleBlockPlacementWithExistingShip(raycaster, eyePosition, lookDirection);
-      
-      if (placed) {
-        // Validate ship blocks after placing
-        this.player.validateShipBlocks();
-        
-        // Save ship to storage
-        this.saveShipToStorage();
-        
-        return true;
-      }
-    } else {
-      // Handle first block placement (creating a new ship)
-      const placed = this.handleFirstBlockPlacement(eyePosition, lookDirection);
-      
-      if (placed) {
-        return true;
-      }
+    if (!this.player.ship?.blockManager?.blocks.length) {
+      console.log('Cannot place block: ship has no blocks to attach to');
+      return false;
+    }
+
+    const placed = this.handleBlockPlacementWithExistingShip(raycaster);
+    
+    if (placed) {
+      this.player.validateShipBlocks();
+      this.saveShipToStorage();
+      return true;
     }
     
     console.log("Could not place block");
@@ -230,32 +219,24 @@ class BlockInteractions {
   }
 
   /**
-   * Handle block placement when the ship already has blocks
-   * @param {THREE.Raycaster} raycaster - The raycaster
-   * @param {THREE.Vector3} eyePosition - The eye position
-   * @param {THREE.Vector3} lookDirection - The look direction
+   * Place adjacent to a raycast hit on an existing ship block face.
+   * @param {THREE.Raycaster} raycaster
+   * @returns {boolean}
    */
-  handleBlockPlacementWithExistingShip(raycaster, eyePosition, lookDirection) {
-    // Get all block meshes from the ship
+  handleBlockPlacementWithExistingShip(raycaster) {
     const blockMeshes = this.getBlockMeshes();
-    
-    // Check for intersection with block meshes
     const intersects = raycaster.intersectObjects(blockMeshes, false);
-    
-    if (intersects.length > 0) {
-      // Get the first intersection
-      const intersection = intersects[0];
-      
-      // Check if the intersection is within the maximum placement distance
-      if (intersection.distance <= this.maxPlaceDistance) {
-        this.placeBlockAdjacentToExisting(intersection);
-      } else {
-        console.log(`Intersection too far (${intersection.distance} > ${this.maxPlaceDistance})`);
-      }
-    } else {
-      console.log("No direct intersection found, trying to place block in air");
-      this.placeBlockInAir(eyePosition, lookDirection);
+
+    if (intersects.length === 0) {
+      return false;
     }
+
+    const intersection = intersects[0];
+    if (intersection.distance > this.maxPlaceDistance) {
+      return false;
+    }
+
+    return this.placeBlockAdjacentToExisting(intersection);
   }
 
   /**
@@ -264,175 +245,47 @@ class BlockInteractions {
    * @returns {Boolean} Whether the block was placed successfully
    */
   placeBlockAdjacentToExisting(intersection) {
-    // Get the block that was hit
     const hitObject = intersection.object;
-    
-    // Find the corresponding block data
-    const hitBlock = this.player.ship.blockManager.blocks.find(block => 
+
+    const hitBlock = this.player.ship.blockManager.blocks.find(block =>
       block.mesh === hitObject
     );
-    
+
     if (!hitBlock) {
-      console.warn("Could not find block data for hit object");
+      console.warn('Could not find block data for hit object');
       return false;
     }
-    
-    // Get the normal directly from the intersection
-    const normal = intersection.face.normal.clone();
-    
-    console.log("Original face normal:", normal);
-    
-    // The normal is in local space of the block mesh
-    // We need to transform it to world space, then to ship-local space
-    
-    // First, transform to world space
-    const worldNormal = normal.clone().transformDirection(hitObject.matrixWorld);
-    console.log("World normal:", worldNormal);
-    
-    // Then transform to ship-local space
-    const shipLocalNormal = this.player.ship.transform.worldToLocalDirection({
-      x: worldNormal.x,
-      y: worldNormal.y,
-      z: worldNormal.z
-    });
-    
-    console.log("Ship-local normal:", shipLocalNormal);
-    
-    // Round the normal to get a grid direction
-    const direction = {
-      x: Math.round(shipLocalNormal.x),
-      y: Math.round(shipLocalNormal.y),
-      z: Math.round(shipLocalNormal.z)
-    };
-    
-    console.log("Grid direction:", direction);
-    
-    // Calculate the position for the new block in ship-local coordinates
-    const newBlockPosition = {
-      x: hitBlock.position.x + direction.x,
-      y: hitBlock.position.y + direction.y,
-      z: hitBlock.position.z + direction.z
-    };
-    
-    console.log("Hit block position:", hitBlock.position);
-    console.log("New block position (ship-local):", newBlockPosition);
-    
-    // Validate the position is not occupied
-    const existingBlock = this.player.ship.blockManager.blocks.find(block => 
+
+    const newBlockPosition = this.player.ship.transform.computePlacementCellFromIntersection(intersection);
+    if (!newBlockPosition) {
+      return false;
+    }
+
+    // ponytail: must be adjacent on ship-local grid, not the hit cell itself
+    const dx = Math.abs(newBlockPosition.x - hitBlock.position.x);
+    const dy = Math.abs(newBlockPosition.y - hitBlock.position.y);
+    const dz = Math.abs(newBlockPosition.z - hitBlock.position.z);
+    const isAdjacent = (dx + dy + dz === 1);
+
+    if (!isAdjacent) {
+      console.warn('Placement cell is not adjacent to hit block', {
+        hit: hitBlock.position,
+        new: newBlockPosition
+      });
+      return false;
+    }
+
+    const existingBlock = this.player.ship.blockManager.blocks.find(block =>
       block.position.x === newBlockPosition.x &&
       block.position.y === newBlockPosition.y &&
       block.position.z === newBlockPosition.z
     );
-    
+
     if (existingBlock) {
-      console.log("Cannot place block: position already occupied");
       return false;
     }
-    
-    // Create and add the block
+
     return this.createAndAddBlock(newBlockPosition);
-  }
-
-  /**
-   * Place a block in the air (not adjacent to any existing block)
-   * @param {THREE.Vector3} eyePosition - The eye position
-   * @param {THREE.Vector3} lookDirection - The look direction
-   */
-  placeBlockInAir(eyePosition, lookDirection) {
-    // Place block in air at a fixed distance
-    const placementPos = new THREE.Vector3().copy(eyePosition).add(
-      lookDirection.clone().multiplyScalar(Math.min(3, this.maxPlaceDistance))
-    );
-    
-    // Round to grid position in world coordinates
-    placementPos.x = Math.round(placementPos.x);
-    placementPos.y = Math.round(placementPos.y);
-    placementPos.z = Math.round(placementPos.z);
-    
-    console.log("World placement position:", placementPos);
-    
-    // Convert world position to ship-local coordinates
-    const gridPos = this.player.ship.worldToLocalPosition({
-      x: placementPos.x,
-      y: placementPos.y,
-      z: placementPos.z
-    });
-    
-    // Round to ensure we're on the grid
-    gridPos.x = Math.round(gridPos.x);
-    gridPos.y = Math.round(gridPos.y);
-    gridPos.z = Math.round(gridPos.z);
-    
-    console.log("Ship-local grid position:", gridPos);
-    
-    // Check if position is within placement range
-    const distance = eyePosition.distanceTo(placementPos);
-    
-    if (distance <= this.maxPlaceDistance) {
-      // Check if there's already a block at this position
-      const existingBlock = this.player.ship.blockManager.blocks.find(block => 
-        block.position.x === gridPos.x &&
-        block.position.y === gridPos.y &&
-        block.position.z === gridPos.z
-      );
-      
-      if (!existingBlock) {
-        // Remove from inventory
-        const removed = this.player.inventory.removeItem(this.player.inventory.selectedSlot);
-        
-        if (removed) {
-          this.createAndAddBlock(gridPos);
-        } else {
-          console.error("Failed to remove block from inventory");
-        }
-      } else {
-        console.error("Block already exists at this position");
-      }
-    } else {
-      console.log(`Block placement too far (${distance} > ${this.maxPlaceDistance})`);
-    }
-  }
-
-  /**
-   * Handle placing the first block on an empty ship
-   * @param {THREE.Vector3} eyePosition - The eye position
-   * @param {THREE.Vector3} lookDirection - The look direction
-   */
-  handleFirstBlockPlacement(eyePosition, lookDirection) {
-    // Place the first block at a distance in front of the player
-    const placementPos = new THREE.Vector3().copy(eyePosition).add(
-      lookDirection.clone().multiplyScalar(2) // Place 2 units in front of player
-    );
-    
-    // Round to grid position in world coordinates
-    placementPos.x = Math.round(placementPos.x);
-    placementPos.y = Math.round(placementPos.y);
-    placementPos.z = Math.round(placementPos.z);
-    
-    console.log("World placement position for first block:", placementPos);
-    
-    // Convert world position to ship-local coordinates
-    const gridPos = this.player.ship.worldToLocalPosition({
-      x: placementPos.x,
-      y: placementPos.y,
-      z: placementPos.z
-    });
-    
-    // Round to ensure we're on the grid
-    gridPos.x = Math.round(gridPos.x);
-    gridPos.y = Math.round(gridPos.y);
-    gridPos.z = Math.round(gridPos.z);
-    
-    console.log("Ship-local grid position for first block:", gridPos);
-    
-    // Remove from inventory
-    const removed = this.player.inventory.removeItem(this.player.inventory.selectedSlot);
-    
-    if (removed) {
-      this.createAndAddBlock(gridPos);
-    } else {
-      console.error("Failed to remove block from inventory");
-    }
   }
 
   /**

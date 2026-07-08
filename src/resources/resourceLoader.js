@@ -54,6 +54,8 @@ export function createResourceLoader(options = {}) {
     textures.set('lift', createCanvasTexture('#FFD700'));
     textures.set('cannon', createCanvasTexture('#696969'));
     textures.set('control', createCanvasTexture('#8B0000'));
+    textures.set('engine', createCanvasTexture('#444444'));
+    textures.set('armor', createCanvasTexture('#606060'));
     textures.set('crosshair', createCanvasTexture('#FFFFFF'));
   };
   
@@ -62,18 +64,19 @@ export function createResourceLoader(options = {}) {
     console.log('Creating fallback ship definition');
     
     const fallbackShip = {
-      name: "Default Ship",
+      name: 'Airship Wars Default',
+      position: { x: 0, y: 50, z: 0 },
       blocks: [
-        { x: 0, y: 0, z: 0, type: "control" },
-        { x: 1, y: 0, z: 0, type: "wood" },
-        { x: -1, y: 0, z: 0, type: "wood" },
-        { x: 0, y: 0, z: 1, type: "wood" },
-        { x: 0, y: 0, z: -1, type: "wood" },
-        { x: 0, y: -1, z: 0, type: "lift" },
-        { x: 1, y: -1, z: 0, type: "lift" },
-        { x: -1, y: -1, z: 0, type: "lift" },
-        { x: 0, y: -1, z: 1, type: "cannon" },
-        { x: 0, y: -1, z: -1, type: "cannon" }
+        { type: "control", position: { x: 0, y: 0, z: 0 } },
+        { type: "wood", position: { x: 1, y: 0, z: 0 } },
+        { type: "wood", position: { x: -1, y: 0, z: 0 } },
+        { type: "wood", position: { x: 0, y: 0, z: 1 } },
+        { type: "wood", position: { x: 0, y: 0, z: -1 } },
+        { type: "lift", position: { x: 0, y: -1, z: 0 } },
+        { type: "lift", position: { x: 1, y: -1, z: 0 } },
+        { type: "lift", position: { x: -1, y: -1, z: 0 } },
+        { type: "cannon", position: { x: 0, y: -1, z: 1 }, direction: { x: 0, y: 0, z: 1 } },
+        { type: "cannon", position: { x: 0, y: -1, z: -1 }, direction: { x: 0, y: 0, z: -1 } }
       ]
     };
     

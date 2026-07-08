@@ -1,222 +1,216 @@
 /**
- * Ship physics module for handling ship movement and physics
+ * Ship physics — blimp-like movement tuned from airshipwars feel.
+ * ponytail: constants live here; scale differs from airshipwars (larger world).
  */
 
 import * as THREE from 'three';
-import { clamp } from '../utils/mathUtils.js';
 
-// Constants
-const GRAVITY = 9.8;
-const DRAG = 0.5;
-const THRUST = 200;
-const ROTATION_SPEED = 20;
-const LIFT_BLOCK_RATIO = 0.3; // Minimum ratio of lift blocks to total blocks
+// Horizontal — airshipwars: maxSpeed 1.0, thrustPower 0.3, damping 0.98
+const MAX_HORIZONTAL_SPEED = 6;
+const FORWARD_ACCEL = 3.5;
+const REVERSE_ACCEL = 2;
+const LINEAR_DAMPING = 0.965;
 
-/**
- * Update ship physics
- * @param {Object} ship - The ship to update
- * @param {Object} worldManager - The world manager
- * @param {number} deltaTime - The time since the last update in seconds
- */
-export function updateShipPhysics(ship, worldManager, deltaTime) {
-  // Skip if no ship
+// Turning — airshipwars: maxTurnRate 0.05/frame, angularDamping 0.95
+const MAX_ANGULAR_SPEED = 0.32;
+const TURN_ACCEL = 1.0;
+const ANGULAR_DAMPING = 0.93;
+
+// Vertical — airshipwars: maxVerticalSpeed 0.6, verticalThrustPower 0.15
+const MAX_VERTICAL_SPEED = 2.5;
+const VERTICAL_ACCEL = 1.5;
+const VERTICAL_DAMPING = 0.94;
+
+// Banking — lean into turns, spring back to level (no barrel rolls)
+const MAX_BANK_ANGLE = 0.12;
+const BANK_FACTOR = 0.4;
+const BANK_RECOVERY = 4.5;
+
+const LIFT_BLOCK_RATIO = 0.3;
+const WORLD_RADIUS = 500;
+const DEFAULT_WORLD_HEIGHT = 500;
+const DEFAULT_SINK_RATE = 0.5;
+
+export function updateShipPhysics(ship, worldManager, deltaTime, worldHeight = DEFAULT_WORLD_HEIGHT) {
   if (!ship) return;
-  
-  // Calculate lift ratio
-  const totalBlocks = ship.blockManager.blocks.length;
-  if (totalBlocks === 0) return;
-  
-  const liftBlocks = ship.blockManager.blocks.filter(block => block.type === 'lift').length;
-  const liftRatio = liftBlocks / totalBlocks;
-  
-  // Ships are neutrally buoyant by default
-  // Only apply sinking if the ship is damaged (less than 30% lift blocks)
-  if (liftRatio < LIFT_BLOCK_RATIO) {
-    // Start sinking
-    if (!ship.isSinking) {
-      ship.isSinking = true;
-    }
-  } else {
-    // Stop sinking
-    if (ship.isSinking) {
-      ship.isSinking = false;
-    }
+
+  const blocks = ship.blockManager?.blocks;
+  if (!blocks || blocks.length === 0) return;
+
+  const liftBlocks = blocks.filter(block => block.type === 'lift').length;
+  ship.isSinking = liftBlocks / blocks.length < LIFT_BLOCK_RATIO;
+
+  applyControls(ship, deltaTime);
+  applyDamping(ship, deltaTime);
+  clampSpeeds(ship);
+
+  if (ship.isSinking) {
+    ship.velocity.y -= (ship.sinkRate || DEFAULT_SINK_RATE) * deltaTime;
   }
-  
-  // Apply thrust based on controls
-  if (ship.controls) {
-    const thrustForce = {
-      x: 0,
-      y: 0,
-      z: 0
-    };
-    
-    if (ship.controls.forward) {
-      thrustForce.z += THRUST * deltaTime;
-    }
-    
-    if (ship.controls.backward) {
-      thrustForce.z -= THRUST * deltaTime;
-    }
-    
-    // Apply vertical thrust - handled directly in Player class
-    // We're not handling vertical movement here anymore to avoid conflicts
-    
-    // Apply thrust in the direction the ship is facing
-    if (thrustForce.z !== 0) {
-      const rotatedForce = rotateForce(thrustForce, ship.rotation);
-      applyForce(ship, rotatedForce);
-    }
-    
-    // Apply rotation
-    if (ship.controls.left) {
-      applyTorque(ship, ROTATION_SPEED * deltaTime);
-    }
-    
-    if (ship.controls.right) {
-      applyTorque(ship, -ROTATION_SPEED * deltaTime);
-    }
-  }
-  
-  // Apply drag
-  const dragForce = {
-    x: -ship.velocity.x * DRAG * deltaTime,
-    // Only apply vertical drag if neither up nor down is pressed
-    y: (ship.controls && (ship.controls.up || ship.controls.down)) ? 0 : -ship.velocity.y * DRAG * 0.1 * deltaTime,
-    z: -ship.velocity.z * DRAG * deltaTime
-  };
-  
-  applyForce(ship, dragForce);
-  
-  // Update position and rotation
+
   updatePosition(ship, deltaTime);
   updateRotation(ship, deltaTime);
-  
-  // Check for collisions
+  applyBanking(ship, deltaTime);
   checkCollisions(ship, worldManager);
-  
-  // Debug log to verify ship position
-  if (ship.controls && (ship.controls.up || ship.controls.down)) {
-    console.log(`End of update cycle - Ship Y: ${ship.position.y}, Group Y: ${ship.group ? ship.group.position.y : 'no group'}`);
+  enforceWorldBoundaries(ship, worldHeight);
+}
+
+function applyControls(ship, deltaTime) {
+  if (!ship.controls) return;
+
+  if (ship.controls.forward) {
+    applyThrust(ship, FORWARD_ACCEL * deltaTime, ship.rotation);
+  }
+  if (ship.controls.backward) {
+    applyThrust(ship, -REVERSE_ACCEL * deltaTime, ship.rotation);
+  }
+
+  if (ship.controls.left) {
+    ship.angularVelocity += TURN_ACCEL * deltaTime;
+  }
+  if (ship.controls.right) {
+    ship.angularVelocity -= TURN_ACCEL * deltaTime;
+  }
+
+  if (ship.controls.up) {
+    ship.velocity.y += VERTICAL_ACCEL * deltaTime;
+  } else if (ship.controls.down) {
+    ship.velocity.y -= VERTICAL_ACCEL * deltaTime;
   }
 }
 
-/**
- * Apply a force to a ship
- * @param {Object} ship - The ship to apply the force to
- * @param {Object} force - The force to apply {x, y, z}
- */
+function applyThrust(ship, thrust, rotation) {
+  const force = rotateForce({ x: 0, y: 0, z: thrust }, rotation);
+  ship.velocity.x += force.x;
+  ship.velocity.z += force.z;
+}
+
+function applyDamping(ship, deltaTime) {
+  const linearDamp = Math.pow(LINEAR_DAMPING, deltaTime * 60);
+  ship.velocity.x *= linearDamp;
+  ship.velocity.z *= linearDamp;
+
+  if (!ship.controls?.up && !ship.controls?.down) {
+    ship.velocity.y *= Math.pow(VERTICAL_DAMPING, deltaTime * 60);
+  }
+
+  ship.angularVelocity *= Math.pow(ANGULAR_DAMPING, deltaTime * 60);
+}
+
+function clampSpeeds(ship) {
+  const hSpeed = Math.hypot(ship.velocity.x, ship.velocity.z);
+  if (hSpeed > MAX_HORIZONTAL_SPEED) {
+    const scale = MAX_HORIZONTAL_SPEED / hSpeed;
+    ship.velocity.x *= scale;
+    ship.velocity.z *= scale;
+  }
+
+  ship.angularVelocity = Math.max(-MAX_ANGULAR_SPEED, Math.min(MAX_ANGULAR_SPEED, ship.angularVelocity));
+  ship.velocity.y = Math.max(-MAX_VERTICAL_SPEED, Math.min(MAX_VERTICAL_SPEED, ship.velocity.y));
+}
+
+function applyBanking(ship, deltaTime) {
+  if (ship.bankAngle === undefined) {
+    ship.bankAngle = 0;
+  }
+
+  const targetBank = Math.max(
+    -MAX_BANK_ANGLE,
+    Math.min(MAX_BANK_ANGLE, -ship.angularVelocity * BANK_FACTOR)
+  );
+
+  ship.bankAngle += (targetBank - ship.bankAngle) * BANK_RECOVERY * deltaTime;
+
+  if (ship.group) {
+    ship.group.rotation.z = ship.bankAngle;
+  }
+}
+
 export function applyForce(ship, force) {
   ship.velocity.x += force.x;
   ship.velocity.y += force.y;
   ship.velocity.z += force.z;
 }
 
-/**
- * Apply a torque to a ship
- * @param {Object} ship - The ship to apply the torque to
- * @param {number} torque - The torque to apply
- */
 export function applyTorque(ship, torque) {
   ship.angularVelocity += torque;
 }
 
-/**
- * Update a ship's position based on its velocity
- * @param {Object} ship - The ship to update
- * @param {number} deltaTime - The time since the last update in seconds
- */
 export function updatePosition(ship, deltaTime) {
-  // Update position based on velocity, but don't override vertical position if controls are active
   ship.position.x += ship.velocity.x * deltaTime;
-  
-  // Only update Y position if not actively changing altitude with controls
-  const isChangingAltitude = ship.controls && (ship.controls.up || ship.controls.down);
-  if (!isChangingAltitude) {
-    ship.position.y += ship.velocity.y * deltaTime;
-  }
-  
+  ship.position.y += ship.velocity.y * deltaTime;
   ship.position.z += ship.velocity.z * deltaTime;
-  
-  // Update group position
+
   if (ship.group) {
     ship.group.position.set(ship.position.x, ship.position.y, ship.position.z);
   }
 }
 
-/**
- * Update a ship's rotation based on its angular velocity
- * @param {Object} ship - The ship to update
- * @param {number} deltaTime - The time since the last update in seconds
- */
 export function updateRotation(ship, deltaTime) {
-  // Update rotation based on angular velocity
   ship.rotation += ship.angularVelocity * deltaTime;
-  
-  // Normalize rotation to [0, 2π)
   ship.rotation = ship.rotation % (Math.PI * 2);
   if (ship.rotation < 0) {
     ship.rotation += Math.PI * 2;
   }
-  
-  // Update group rotation
+
   if (ship.group) {
     ship.group.rotation.y = ship.rotation;
   }
 }
 
-/**
- * Check for collisions between a ship and the world
- * @param {Object} ship - The ship to check
- * @param {Object} worldManager - The world manager to check against
- * @returns {boolean} Whether a collision occurred
- */
 export function checkCollisions(ship, worldManager) {
-  // Simple collision check with the ground
-  if (!ship.blockManager || ship.blockManager.blocks.length === 0) {
+  const blocks = ship.blockManager?.blocks;
+  if (!blocks || blocks.length === 0) {
     return false;
   }
-  
-  const lowestBlock = ship.blockManager.blocks.reduce((lowest, block) => {
-    if (block.position.y < lowest.position.y) {
-      return block;
-    }
-    return lowest;
-  }, ship.blockManager.blocks[0]);
-  
-  if (!lowestBlock) return false;
-  
+
+  const lowestBlock = blocks.reduce((lowest, block) =>
+    block.position.y < lowest.position.y ? block : lowest
+  , blocks[0]);
+
   const lowestY = ship.position.y + lowestBlock.position.y;
-  
-  // Check if the lowest block is below the ground
+
   if (lowestY < 1) {
-    // Move the ship up so it's not colliding
     ship.position.y += (1 - lowestY);
-    
-    // Update group position
+    ship.velocity.y = 0;
     if (ship.group) {
       ship.group.position.y = ship.position.y;
     }
-    
     return true;
   }
-  
+
   return false;
 }
 
-/**
- * Rotate a force vector based on ship rotation
- * @param {Object} force - The force vector {x, y, z}
- * @param {number} rotation - The rotation angle in radians
- * @returns {Object} The rotated force vector
- */
+export function enforceWorldBoundaries(ship, worldHeight = DEFAULT_WORLD_HEIGHT) {
+  const distance = Math.hypot(ship.position.x, ship.position.z);
+
+  if (distance > WORLD_RADIUS) {
+    const angle = Math.atan2(ship.position.z, ship.position.x);
+    ship.position.x = Math.cos(angle) * WORLD_RADIUS;
+    ship.position.z = Math.sin(angle) * WORLD_RADIUS;
+    ship.velocity.x *= -0.3;
+    ship.velocity.z *= -0.3;
+  }
+
+  if (ship.position.y > worldHeight) {
+    ship.position.y = worldHeight;
+    ship.velocity.y = 0;
+  }
+
+  if (ship.position.y < 0) {
+    ship.position.y = 0;
+    ship.velocity.y = 0;
+  }
+
+  if (ship.group) {
+    ship.group.position.set(ship.position.x, ship.position.y, ship.position.z);
+  }
+}
+
 function rotateForce(force, rotation) {
   const vector = new THREE.Vector3(force.x, force.y, force.z);
   vector.applyAxisAngle(new THREE.Vector3(0, 1, 0), rotation);
-  
-  return {
-    x: vector.x,
-    y: vector.y,
-    z: vector.z
-  };
-} 
+
+  return { x: vector.x, y: vector.y, z: vector.z };
+}

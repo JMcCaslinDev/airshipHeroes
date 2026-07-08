@@ -78,9 +78,11 @@ class ShipWeapons {
     
     // If firing was successful, return the projectile
     if (projectile) {
-      // Add ship velocity to projectile velocity
-      projectile.velocity.x += this.ship.velocity.x;
-      projectile.velocity.z += this.ship.velocity.z;
+      // Add ship velocity to projectile velocity (stored on userData by cannon.fire)
+      if (projectile.userData.velocity) {
+        projectile.userData.velocity.x += this.ship.velocity.x;
+        projectile.userData.velocity.z += this.ship.velocity.z;
+      }
       
       // Set the owner of the projectile
       if (this.ship.owner) {

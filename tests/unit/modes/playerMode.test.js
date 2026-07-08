@@ -8,18 +8,42 @@ import * as THREE from 'three';
 // Mock Three.js
 jest.mock('three', () => {
   const mockVector3 = {
-    set: jest.fn(),
-    clone: jest.fn().mockReturnThis(),
-    normalize: jest.fn().mockReturnThis(),
-    applyAxisAngle: jest.fn().mockReturnThis(),
-    applyEuler: jest.fn().mockReturnThis(),
-    add: jest.fn().mockReturnThis(),
-    multiplyScalar: jest.fn().mockReturnThis(),
-    subVectors: jest.fn().mockReturnThis(),
-    length: 1,
     x: 0,
     y: 0,
-    z: 0
+    z: 0,
+    set: jest.fn(),
+    clone: jest.fn().mockReturnThis(),
+    normalize: jest.fn(function normalize() {
+      const len = Math.sqrt(this.x * this.x + this.y * this.y + this.z * this.z) || 1;
+      this.x /= len;
+      this.y /= len;
+      this.z /= len;
+      return this;
+    }),
+    applyAxisAngle: jest.fn().mockReturnThis(),
+    applyEuler: jest.fn().mockReturnThis(),
+    add: jest.fn(function add(v) {
+      this.x += v.x || 0;
+      this.y += v.y || 0;
+      this.z += v.z || 0;
+      return this;
+    }),
+    sub: jest.fn(function sub(v) {
+      this.x -= v.x || 0;
+      this.y -= v.y || 0;
+      this.z -= v.z || 0;
+      return this;
+    }),
+    multiplyScalar: jest.fn(function multiplyScalar(s) {
+      this.x *= s;
+      this.y *= s;
+      this.z *= s;
+      return this;
+    }),
+    subVectors: jest.fn().mockReturnThis(),
+    length: jest.fn(function length() {
+      return Math.sqrt(this.x * this.x + this.y * this.y + this.z * this.z);
+    })
   };
   
   const mockBox3 = {
@@ -51,7 +75,7 @@ jest.mock('three', () => {
   };
   
   return {
-    Vector3: jest.fn().mockImplementation(() => ({ ...mockVector3 })),
+    Vector3: jest.fn().mockImplementation((x = 0, y = 0, z = 0) => ({ ...mockVector3, x, y, z })),
     Box3: jest.fn().mockImplementation(() => ({ ...mockBox3 })),
     Raycaster: jest.fn().mockImplementation(() => ({ ...mockRaycaster })),
     Mesh: jest.fn().mockImplementation(() => ({ ...mockMesh })),
@@ -71,6 +95,11 @@ describe('Player Mode Controller', () => {
   let mockWorld;
   
   beforeEach(() => {
+    global.requestAnimationFrame = (cb) => {
+      cb();
+      return 0;
+    };
+
     // Mock document.body.requestPointerLock
     document.body.requestPointerLock = jest.fn();
     document.exitPointerLock = jest.fn();
@@ -79,62 +108,45 @@ describe('Player Mode Controller', () => {
     // Create mock player
     mockPlayer = {
       mode: 'player',
+      cameraRotation: { x: 0, y: 0 },
       character: {
         position: { x: 0, y: 0, z: 0 },
-        rotation: { x: 0, y: 0, z: 0 },
+        rotation: 0,
         velocity: { x: 0, y: 0, z: 0 },
-        onGround: true,
-        height: 1.8,
-        width: 0.6,
-        speed: 5,
-        jumpForce: 10,
-        gravity: 20,
+        isJumping: false,
+        isSneaking: false,
         mesh: {
-          position: { 
-            x: 0, 
-            y: 0, 
-            z: 0,
-            set: jest.fn() 
-          },
-          rotation: { x: 0, y: 0, z: 0 }
-        },
-        move: jest.fn(),
-        jump: jest.fn(),
-        sneak: jest.fn(),
-        stopSneak: jest.fn()
+          position: { x: 0, y: 0, z: 0, set: jest.fn() },
+          rotation: { x: 0, y: 0, z: 0, y: 0 },
+          visible: false
+        }
       },
       ship: {
         position: { x: 0, y: 0, z: 0 },
-        steeringWheel: {
-          position: { x: 0, y: 0, z: 0 }
-        },
-        blocks: [],
-        group: {
-          children: [],
-          add: jest.fn(),
-          remove: jest.fn()
-        }
+        blockManager: { blocks: [] },
+        group: { children: [], add: jest.fn(), remove: jest.fn() },
+        getBlockWorldPosition: jest.fn(() => ({ x: 0, y: 0, z: 0 }))
       },
       inventory: {
         selectedSlot: 0,
-        slots: Array(9).fill(null)
+        slots: Array(9).fill(null),
+        getSelectedBlock: jest.fn().mockReturnValue({ type: 'wood' })
+      },
+      controls: {
+        blockInteractions: {
+          maxPlaceDistance: 4,
+          breakBlock: jest.fn().mockReturnValue(false),
+          placeBlock: jest.fn().mockReturnValue(false)
+        }
       }
     };
     
     // Create mock camera
     mockCamera = {
-      position: { 
-        x: 0, 
-        y: 0, 
-        z: 0,
-        set: jest.fn() 
-      },
-      rotation: { 
-        x: 0, 
-        y: 0, 
-        z: 0,
-        set: jest.fn() 
-      },
+      position: { x: 0, y: 0, z: 0, set: jest.fn() },
+      rotation: { x: 0, y: 0, z: 0, order: 'YXZ' },
+      updateProjectionMatrix: jest.fn(),
+      updateMatrixWorld: jest.fn(),
       lookAt: jest.fn()
     };
     
@@ -146,7 +158,7 @@ describe('Player Mode Controller', () => {
     };
     
     // Create controller
-    controller = createPlayerModeController(mockPlayer, mockCamera, mockWorld);
+    controller = createPlayerModeController(mockPlayer, mockCamera);
     controller.activate();
   });
   
@@ -165,175 +177,92 @@ describe('Player Mode Controller', () => {
   });
   
   test('should deactivate player mode', () => {
-    // First activate
+    document.pointerLockElement = document.body;
     controller.activate();
-    
-    // Then deactivate
     controller.deactivate();
-    
+
     expect(controller.active).toBe(false);
     expect(document.exitPointerLock).toHaveBeenCalled();
+    document.pointerLockElement = null;
   });
   
-  test('handleInput should call character.move with correct direction for W key (forward)', () => {
-    // Create mock keys object with W key pressed
-    const keys = {
-      w: true,
-      s: false,
-      a: false,
-      d: false,
-      space: false,
-      x: false
-    };
-    
-    // Handle input
-    controller.handleInput(keys);
-    
-    // Check that move was called with forward direction
-    expect(mockPlayer.character.move).toHaveBeenCalledWith(expect.objectContaining({
-      z: expect.any(Number)
-    }));
-    
-    // Get the direction argument
-    const moveArg = mockPlayer.character.move.mock.calls[0][0];
-    
-    // Check that z component is negative (forward in player space)
-    expect(moveArg.z).toBeLessThan(0);
+  test('handleInput should set forward velocity for W key', () => {
+    controller.handleInput({
+      forward: true,
+      backward: false,
+      left: false,
+      right: false,
+      up: false,
+      down: false
+    });
+
+    expect(mockPlayer.character.velocity.z).toBeLessThan(0);
   });
-  
-  test('handleInput should call character.move with correct direction for S key (backward)', () => {
-    // Create mock keys object with S key pressed
-    const keys = {
-      w: false,
-      s: true,
-      a: false,
-      d: false,
-      space: false,
-      x: false
-    };
-    
-    // Handle input
-    controller.handleInput(keys);
-    
-    // Check that move was called with backward direction
-    expect(mockPlayer.character.move).toHaveBeenCalledWith(expect.objectContaining({
-      z: expect.any(Number)
-    }));
-    
-    // Get the direction argument
-    const moveArg = mockPlayer.character.move.mock.calls[0][0];
-    
-    // Check that z component is positive (backward in player space)
-    expect(moveArg.z).toBeGreaterThan(0);
+
+  test('handleInput should set backward velocity for S key', () => {
+    controller.handleInput({
+      forward: false,
+      backward: true,
+      left: false,
+      right: false,
+      up: false,
+      down: false
+    });
+
+    expect(mockPlayer.character.velocity.z).toBeGreaterThan(0);
   });
-  
-  test('handleInput should call character.move with correct direction for A key (left)', () => {
-    // Create mock keys object with A key pressed
-    const keys = {
-      w: false,
-      s: false,
-      a: true,
-      d: false,
-      space: false,
-      x: false
-    };
-    
-    // Handle input
-    controller.handleInput(keys);
-    
-    // Check that move was called with left direction
-    expect(mockPlayer.character.move).toHaveBeenCalledWith(expect.objectContaining({
-      x: expect.any(Number)
-    }));
-    
-    // Get the direction argument
-    const moveArg = mockPlayer.character.move.mock.calls[0][0];
-    
-    // Check that x component is negative (left in player space)
-    expect(moveArg.x).toBeLessThan(0);
+
+  test('handleInput should set left velocity for A key', () => {
+    controller.handleInput({
+      forward: false,
+      backward: false,
+      left: true,
+      right: false,
+      up: false,
+      down: false
+    });
+
+    expect(mockPlayer.character.velocity.x).toBeLessThan(0);
   });
-  
-  test('handleInput should call character.move with correct direction for D key (right)', () => {
-    // Create mock keys object with D key pressed
-    const keys = {
-      w: false,
-      s: false,
-      a: false,
-      d: true,
-      space: false,
-      x: false
-    };
-    
-    // Handle input
-    controller.handleInput(keys);
-    
-    // Check that move was called with right direction
-    expect(mockPlayer.character.move).toHaveBeenCalledWith(expect.objectContaining({
-      x: expect.any(Number)
-    }));
-    
-    // Get the direction argument
-    const moveArg = mockPlayer.character.move.mock.calls[0][0];
-    
-    // Check that x component is positive (right in player space)
-    expect(moveArg.x).toBeGreaterThan(0);
+
+  test('handleInput should set right velocity for D key', () => {
+    controller.handleInput({
+      forward: false,
+      backward: false,
+      left: false,
+      right: true,
+      up: false,
+      down: false
+    });
+
+    expect(mockPlayer.character.velocity.x).toBeGreaterThan(0);
   });
-  
-  test('handleInput should call character.jump when Space key is pressed', () => {
-    // Create mock keys object with Space key pressed
-    const keys = {
-      w: false,
-      s: false,
-      a: false,
-      d: false,
-      space: true,
-      x: false
-    };
-    
-    // Handle input
-    controller.handleInput(keys);
-    
-    // Check that jump was called
-    expect(mockPlayer.character.jump).toHaveBeenCalled();
+
+  test('handleInput should apply jump velocity when Space is pressed', () => {
+    controller.handleInput({
+      forward: false,
+      backward: false,
+      left: false,
+      right: false,
+      up: true,
+      down: false
+    });
+
+    expect(mockPlayer.character.velocity.y).toBeGreaterThan(0);
+    expect(mockPlayer.character.isJumping).toBe(true);
   });
-  
-  test('handleInput should call character.sneak when X key is pressed', () => {
-    // Create mock keys object with X key pressed
-    const keys = {
-      w: false,
-      s: false,
-      a: false,
-      d: false,
-      space: false,
-      x: true
-    };
-    
-    // Handle input
-    controller.handleInput(keys);
-    
-    // Check that sneak was called
-    expect(mockPlayer.character.sneak).toHaveBeenCalled();
-  });
-  
-  test('handleInput should call character.stopSneak when X key is released', () => {
-    // Set character to sneaking
-    mockPlayer.character.isSneaking = true;
-    
-    // Create mock keys object with X key not pressed
-    const keys = {
-      w: false,
-      s: false,
-      a: false,
-      d: false,
-      space: false,
-      x: false
-    };
-    
-    // Handle input
-    controller.handleInput(keys);
-    
-    // Check that stopSneak was called
-    expect(mockPlayer.character.stopSneak).toHaveBeenCalled();
+
+  test('handleInput should set sneaking when X is pressed', () => {
+    controller.handleInput({
+      forward: false,
+      backward: false,
+      left: false,
+      right: false,
+      up: false,
+      down: true
+    });
+
+    expect(mockPlayer.character.isSneaking).toBe(true);
   });
   
   test('activate should set player mode to player', () => {
@@ -393,33 +322,16 @@ describe('Player Mode Controller', () => {
     expect(mockCamera.position.z).toBe(10);
   });
   
-  test('should handle mouse down events', () => {
-    // Create a mock intersection
-    const mockIntersection = {
-      distance: 2,
-      point: new THREE.Vector3(1, 1, 1),
-      object: { userData: { blockType: 'wood' } }
-    };
-    
-    // Set up the raycaster mock to return our intersection
-    const mockRaycaster = new THREE.Raycaster();
-    mockRaycaster.intersectObjects.mockReturnValue([mockIntersection]);
-    
-    // Replace the controller's raycaster with our mock
-    controller.raycaster = mockRaycaster;
-    
-    // Mock the mouse event
+  test('should delegate left click to BlockInteractions.breakBlock', () => {
     const mockEvent = {
-      button: 0, // Left click
-      clientX: 400,
-      clientY: 300
+      button: 0,
+      preventDefault: jest.fn(),
+      stopPropagation: jest.fn()
     };
-    
-    // Call the mouse down handler
+
     controller.handleMouseDown(mockEvent);
-    
-    // Verify that the world.setBlock method was called
-    expect(mockWorld.setBlock).toHaveBeenCalled();
+
+    expect(mockPlayer.controls.blockInteractions.breakBlock).toHaveBeenCalled();
   });
   
   test('should update player position and handle collisions', () => {

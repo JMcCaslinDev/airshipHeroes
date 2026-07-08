@@ -90,6 +90,11 @@ class ShipBlockManager {
       console.log(`Set ${block.type} as steering wheel reference`);
     }
     
+    // Hide debug placeholder when the ship has real blocks
+    if (this.ship.debugMesh && this.blocks.length > 0) {
+      this.ship.debugMesh.visible = false;
+    }
+
     // Check if the ship has enough lift
     this.checkLift();
     
